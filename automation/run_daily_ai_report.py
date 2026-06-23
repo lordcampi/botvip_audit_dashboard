@@ -6,6 +6,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.telegram_delivery import send_report_zip_if_enabled
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run BotVIP Daily AI Reporter batch safely.")
@@ -31,6 +33,9 @@ def main() -> int:
         cmd.append("--dry-run")
 
     started = datetime.now(timezone.utc).isoformat()
+    telegram_sent = False
+    telegram_error = None
+
     with log_path.open("a", encoding="utf-8", newline="\n") as log:
         log.write("\n=== daily_ai_report start " + started + " ===\n")
         log.write("cmd: " + " ".join(cmd) + "\n")
@@ -39,6 +44,13 @@ def main() -> int:
             log.write(proc.stdout + "\n")
         if proc.stderr:
             log.write("STDERR:\n" + proc.stderr + "\n")
+        if proc.returncode == 0 and not args.dry_run:
+            try:
+                telegram_sent = send_report_zip_if_enabled(root, proc.stdout)
+                log.write("telegram_sent: " + str(telegram_sent) + "\n")
+            except Exception as exc:
+                telegram_error = str(exc)
+                log.write("telegram_error: " + telegram_error + "\n")
         log.write("returncode: " + str(proc.returncode) + "\n")
         log.write("=== daily_ai_report end " + datetime.now(timezone.utc).isoformat() + " ===\n")
 
@@ -46,6 +58,10 @@ def main() -> int:
         print(proc.stdout)
     if proc.stderr:
         print(proc.stderr, file=sys.stderr)
+    if telegram_sent:
+        print("Telegram delivery OK")
+    if telegram_error:
+        print("Telegram delivery WARNING: " + telegram_error, file=sys.stderr)
     return int(proc.returncode)
 
 
