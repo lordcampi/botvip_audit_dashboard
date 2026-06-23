@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime
+from pathlib import Path
+
+from src.ai_pack_builder import build_ai_prompt, build_ai_review_pack, build_executive_summary
+from src.daily_facts import build_daily_facts, write_facts_csv
+from src.db_readonly import assert_readonly, connect_readonly, get_db_path
+from src.f4_t11a_audit import audit_f4_t11a_semantics
+from src.hypothesis_builder import build_strategy_hypotheses, write_strategy_hypotheses
+from src.lifecycle_metrics import compute_lifecycle_metrics
+from src.loaders import load_candidate_snapshots, load_events, load_signals
+from src.near_misses import select_near_misses, write_near_misses_csv
+from src.ofa_funnel import compute_filter_funnel, write_filter_funnel_csv
+from src.rejection_analysis import compute_blocked_analysis, write_blocked_candidates_csv
+from src.report_writer import create_zip, write_json, write_rows_csv, write_text
+from src.schema_mapper import SchemaMap
+from src.text_splitter import write_split_text
+from src.time_windows import parse_window
+from src.winners_losers import compare_winners_losers, write_winners_losers_csv
+
+
+def report_date_from_window_end(end_text: str) -> str:
+    try:
+        return datetime.strptime(end_text[:19], "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate BotVIP Daily AI Reporter pack in read-only mode.")
+    parser.add_argument("--window", default="daily", help="daily, 24h, 12h, 7d. Default: daily 5am Colombia window")
+    parser.add_argument("--output", default="reports", help="Output directory. Default: reports")
+    parser.add_argument("--db-path", default=None, help="Optional DB path override")
+    parser.add_argument("--max-ai-chars", type=int, default=120000, help="Max characters per AI review pack txt part")
+    parser.add_argument("--dry-run", action="store_true", help="Validate and print summary without writing report files")
+    args = parser.parse_args()
+
+    schema = SchemaMap.load("config/schema_map.json")
+    window = parse_window(args.window)
+    db_path = get_db_path(args.db_path)
+
+    with connect_readonly(db_path) as conn:
+        assert_readonly(conn)
+        validation = schema.validate_against_db(conn)
+        if not validation.get("ok"):
+            raise SystemExit("Schema validation failed: " + json.dumps(validation, ensure_ascii=False, default=str))
+        events = load_events(conn, schema, window, limit=500000)
+        signals = load_signals(conn, schema, window, limit=500000)
+        candidates = load_candidate_snapshots(conn, schema, window, limit=500000)
+
+    facts = build_daily_facts(events, signals, candidates)
+    lifecycle = compute_lifecycle_metrics(facts)
+    audit = audit_f4_t11a_semantics(facts)
+    blocked_summary = compute_blocked_analysis(facts)
+    winners_losers_rows = compare_winners_losers(facts)
+    funnel_rows: list[dict] = []
+    funnel_rows.extend(compute_filter_funnel(facts, record_type="signal"))
+    funnel_rows.extend(compute_filter_funnel(facts, record_type="candidate"))
+    near_misses = select_near_misses(facts, limit=200)
+    hypotheses = build_strategy_hypotheses(lifecycle, blocked_summary, winners_losers_rows, near_misses)
+
+    report_date = report_date_from_window_end(window.end_text)
+    report_dir = Path(args.output) / report_date
+
+    executive_summary = build_executive_summary(window.label, window.start_text, window.end_text, lifecycle, audit, blocked_summary, hypotheses)
+    ai_prompt = build_ai_prompt()
+    ai_pack = build_ai_review_pack(
+        window.label,
+        window.start_text,
+        window.end_text,
+        executive_summary,
+        lifecycle,
+        audit,
+        blocked_summary,
+        winners_losers_rows,
+        funnel_rows,
+        near_misses,
+        hypotheses,
+    )
+
+    summary = {
+        "window": {"label": window.label, "start": window.start_text, "end": window.end_text},
+        "rows": {"events": len(events), "signals": len(signals), "candidates": len(candidates), "facts": len(facts)},
+        "lifecycle": lifecycle,
+        "audit": audit,
+        "blocked_summary": blocked_summary,
+        "hypotheses_count": len(hypotheses),
+    }
+
+    if args.dry_run:
+        print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+        print("OK: dry-run completed. No files written.")
+        return 0
+
+    written: list[Path] = []
+    written.append(write_text(executive_summary, report_dir / "01_executive_summary.md"))
+    write_facts_csv(facts, report_dir / "02_daily_signal_facts.csv")
+    written.append(report_dir / "02_daily_signal_facts.csv")
+    write_blocked_candidates_csv(facts, report_dir / "03_blocked_candidates.csv")
+    written.append(report_dir / "03_blocked_candidates.csv")
+    write_winners_losers_csv(winners_losers_rows, report_dir / "04_winners_vs_losers.csv")
+    written.append(report_dir / "04_winners_vs_losers.csv")
+    write_filter_funnel_csv(funnel_rows, report_dir / "05_filter_funnel.csv")
+    written.append(report_dir / "05_filter_funnel.csv")
+    write_near_misses_csv(near_misses, report_dir / "06_near_misses.csv")
+    written.append(report_dir / "06_near_misses.csv")
+    written.append(write_rows_csv(events, report_dir / "07_lifecycle_events.csv"))
+    write_strategy_hypotheses(hypotheses, report_dir / "08_strategy_hypotheses.json")
+    written.append(report_dir / "08_strategy_hypotheses.json")
+    written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
+    ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
+    written.extend(ai_parts)
+    written.append(write_json(summary, report_dir / "report_manifest.json"))
+
+    zip_path = report_dir / f"AI_REVIEW_{report_date}.zip"
+    create_zip(written, zip_path, base_dir=report_dir)
+
+    print(json.dumps({
+        "report_dir": str(report_dir),
+        "zip_path": str(zip_path),
+        "files_written": [str(p) for p in written] + [str(zip_path)],
+        "summary": summary,
+    }, indent=2, ensure_ascii=False, default=str))
+    print("OK: Daily AI Reporter pack generated")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

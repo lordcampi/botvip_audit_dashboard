@@ -1,0 +1,68 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+id_rsa*
+id_ed25519*
+
+# Local DB / generated data
+/data/
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+
+# Reports / logs / generated packs
+/reports/
+/logs/
+*.zip
+
+# Windows / editor
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Temporary patch/smoke artifacts
+*.backup
+*.f5_t09_backup
+tmp_*.py
+semantic_probe.json
+semantic_probe_report.txt
+schema_discovery.json
+schema_discovery_report.txt
+
+# Local phase/install/smoke scripts generated during assisted build
+/F5_T*.py
+/F5_T*.ps1
+/F5_T*.md
+
+# Root-level generated schema/probe artifacts
+/config_schema_map_v0.json
+/schema_map.json
+/tmp_hyp.py
+
+# Local schema backups
+/config/*.backup.json
+/config/schema_map.backup.json

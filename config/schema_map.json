@@ -1,0 +1,592 @@
+{
+  "schema_map_version": "f5_t04_botvip_daily_ai_reporter_v0",
+  "purpose": "Definitive initial schema map for BotVIP Daily AI Reporter based on Fase 0 schema discovery and semantic probe.",
+  "safety": {
+    "project_scope": "independent_reporter_only",
+    "db_mode": "read_only",
+    "sqlite_uri_mode": "ro",
+    "pragma_query_only": true,
+    "no_writes": [
+      "INSERT",
+      "UPDATE",
+      "DELETE",
+      "ALTER",
+      "DROP",
+      "CREATE INDEX",
+      "VACUUM"
+    ],
+    "do_not_include_tables_in_ai_pack": [
+      "users",
+      "payments",
+      "blockchain_transactions",
+      "alembic_version"
+    ],
+    "do_not_touch_bot_project": true
+  },
+  "timezone": {
+    "report_timezone": "America/Bogota",
+    "daily_run_local_time": "05:00",
+    "daily_run_utc_time": "10:00",
+    "default_window": "previous_24h_colombia"
+  },
+  "tables": {
+    "events": {
+      "table": "signal_events",
+      "role": "lifecycle_events",
+      "primary_key": "id",
+      "signal_id": "signal_id",
+      "timestamp": "event_time",
+      "event_type": "event_type",
+      "price": "price",
+      "message": "message",
+      "metadata_json": "metadata_json",
+      "telegram_message_id": "telegram_message_id",
+      "known_event_types_from_probe": [
+        "DATA_GAP_DETECTED",
+        "COPYABILITY_EVALUATED",
+        "CREATED",
+        "OFA_RECLAIM_CONFIRMED",
+        "OFA_SWEEP_DETECTED",
+        "ACTIVATED",
+        "NOTIFIED",
+        "NO_PROGRESS_EXIT",
+        "STOP_LOSS_HIT",
+        "PARTIAL_TP_HIT",
+        "BREAKEVEN_ARMED",
+        "CANCELLED_EXPIRED",
+        "PRIMARY_TP_HIT",
+        "RUNNER_BREAKEVEN_STOP_HIT",
+        "SL_MOVED_TO_BREAKEVEN",
+        "TIME_STOP_EXIT",
+        "MFE_STALL_EXIT",
+        "TAKE_PROFIT_HIT"
+      ],
+      "aliases": {
+        "created": [
+          "CREATED",
+          "SIGNAL_CREATED"
+        ],
+        "activated": [
+          "ACTIVATED",
+          "SIGNAL_ACTIVATED"
+        ],
+        "notified": [
+          "NOTIFIED"
+        ],
+        "cancelled": [
+          "CANCELLED_EXPIRED",
+          "SIGNAL_CANCELLED"
+        ],
+        "primary_tp": [
+          "PRIMARY_TP_HIT",
+          "PARTIAL_TP_HIT",
+          "TAKE_PROFIT_HIT"
+        ],
+        "real_stop_loss": [
+          "STOP_LOSS_HIT"
+        ],
+        "breakeven": [
+          "BREAKEVEN_ARMED",
+          "SL_MOVED_TO_BREAKEVEN",
+          "BREAKEVEN_STOP_HIT"
+        ],
+        "runner_breakeven": [
+          "RUNNER_BREAKEVEN_STOP_HIT"
+        ],
+        "time_stop": [
+          "TIME_STOP_EXIT"
+        ],
+        "no_progress": [
+          "NO_PROGRESS_EXIT",
+          "MFE_STALL_EXIT"
+        ],
+        "data_gap": [
+          "DATA_GAP_DETECTED"
+        ]
+      },
+      "json_paths_of_interest": {
+        "symbol": [
+          "symbol"
+        ],
+        "side": [
+          "side"
+        ],
+        "score": [
+          "score",
+          "ofa_context.score"
+        ],
+        "min_score": [
+          "min_score"
+        ],
+        "ofa_funnel": [
+          "ofa_funnel"
+        ],
+        "copyability_context": [
+          "copyability_context"
+        ],
+        "execution_context": [
+          "execution_context"
+        ],
+        "risk_context": [
+          "risk_context"
+        ],
+        "official_result": [
+          "official_result",
+          "official_result.official_result"
+        ],
+        "official_result_locked": [
+          "official_result_locked",
+          "official_result.official_result_locked"
+        ],
+        "runner_shadow": [
+          "runner_shadow"
+        ],
+        "primary_tp_price": [
+          "primary_tp_price",
+          "official_result.primary_tp_price"
+        ],
+        "market_regime": [
+          "market_regime",
+          "regime"
+        ],
+        "setup_type": [
+          "setup_type"
+        ]
+      }
+    },
+    "signals": {
+      "table": "signal_records",
+      "role": "official_signal_records",
+      "primary_key": "id",
+      "timestamp": "created_at",
+      "opened_at": "opened_at",
+      "closed_at": "closed_at",
+      "symbol": "symbol",
+      "side": "signal_type",
+      "entry_price": "entry_price",
+      "tp_price": "tp_price",
+      "sl_price": "sl_price",
+      "status": "status",
+      "score": "score",
+      "min_score": "min_score",
+      "setup_type": "setup",
+      "strategy_version": "strategy_version",
+      "timeframe": "timeframe",
+      "macro_timeframe": "macro_timeframe",
+      "detection_price": "detection_price",
+      "risk_pct": "risk_pct",
+      "gross_rr": "gross_rr",
+      "net_rr": "net_rr",
+      "estimated_cost": "estimated_cost",
+      "operating_mode": "operating_mode",
+      "btc_trend": "btc_trend",
+      "weekend": "weekend",
+      "spread_pct": "spread_pct",
+      "quote_volume": "quote_volume",
+      "metrics_json": "metrics_json",
+      "confluences_json": "confluences_json",
+      "expires_at": "expires_at",
+      "exit_reason": "exit_reason",
+      "pnl_r": "pnl_r",
+      "exit_price": "exit_price",
+      "gross_r": "gross_r",
+      "net_r": "net_r",
+      "engine_name": "engine_name",
+      "is_shadow": "is_shadow",
+      "signal_tier": "signal_tier",
+      "market_regime": "market_regime",
+      "known_status_from_probe": [
+        "near_miss_chop",
+        "CLOSED",
+        "LOST",
+        "WON",
+        "EXPIRED",
+        "PENDING",
+        "OPEN"
+      ],
+      "known_exit_reasons_from_probe": [
+        "no_progress",
+        "breakeven_stop",
+        "stop_loss",
+        "time_stop",
+        "runner_breakeven_stop",
+        "expired_pending",
+        "take_profit",
+        "mfe_stall"
+      ],
+      "json_paths_of_interest": {
+        "official_result": [
+          "official_result",
+          "official_result.official_result"
+        ],
+        "official_result_locked": [
+          "official_result_locked",
+          "official_result.official_result_locked"
+        ],
+        "runner_shadow": [
+          "runner_shadow"
+        ],
+        "initial_geometry": [
+          "initial_geometry"
+        ],
+        "current_geometry": [
+          "current_geometry"
+        ],
+        "primary_tp_price": [
+          "primary_tp_price"
+        ],
+        "ofa_funnel": [
+          "ofa_funnel"
+        ],
+        "copyability_context": [
+          "copyability_context"
+        ],
+        "execution_context": [
+          "execution_context"
+        ],
+        "risk_context": [
+          "risk_context"
+        ],
+        "score": [
+          "score"
+        ],
+        "min_score": [
+          "min_score"
+        ],
+        "rvol": [
+          "rvol"
+        ],
+        "market_regime": [
+          "market_regime",
+          "regime"
+        ],
+        "setup_type": [
+          "setup_type"
+        ],
+        "btc_trend": [
+          "btc_trend"
+        ]
+      }
+    },
+    "candidate_snapshots": {
+      "table": "scanner_candidate_shadow_snapshots",
+      "role": "blocked_candidates_and_shadow_snapshots",
+      "primary_key": "id",
+      "timestamp": "created_at",
+      "cycle_id": "cycle_id",
+      "mode": "mode",
+      "symbol": "symbol",
+      "reason": "reason",
+      "adx": "adx",
+      "rvol": "rvol",
+      "atr_extension": "atr_extension",
+      "score": "score",
+      "passed_filter_columns": [
+        "passed_adx_18",
+        "passed_adx_20",
+        "passed_adx_22",
+        "passed_rvol_1_0",
+        "passed_rvol_1_1",
+        "passed_rvol_1_2"
+      ],
+      "metadata_json": "metadata_json",
+      "known_reasons_from_probe_top": [
+        "rvol_low",
+        "atr_extension_high",
+        "no_pullback",
+        "adx_low",
+        "ofa_shadow_reclaim_blocked",
+        "range_noise",
+        "ofa_shadow_sweep_blocked",
+        "move_strength_low",
+        "recent_stop_loss",
+        "live_guard:ofa_live_regime_blocked",
+        "move_strength_high",
+        "strict_pullback_disabled",
+        "chop_market",
+        "atr_extension_low",
+        "live_guard:ofa_live_symbol_not_allowed",
+        "near_miss_chop",
+        "micro_timeframe_unconfirmed",
+        "live_guard:ofa_live_rvol_too_low",
+        "delta_not_confirmed_long",
+        "micro_timeframe_contradiction",
+        "live_guard:ofa_live_atr_extension_high",
+        "cooldown",
+        "delta_not_confirmed_short",
+        "ofa_shadow_ok"
+      ],
+      "json_paths_of_interest": {
+        "duration_seconds": [
+          "duration_seconds"
+        ],
+        "entry": [
+          "entry"
+        ],
+        "tp": [
+          "tp"
+        ],
+        "sl": [
+          "sl"
+        ],
+        "spread_pct": [
+          "spread_pct"
+        ],
+        "estimated_slippage_pct": [
+          "estimated_slippage_pct"
+        ],
+        "hypothetical_result": [
+          "hypothetical_result"
+        ],
+        "hypothetical_exit_reason": [
+          "hypothetical_exit_reason"
+        ],
+        "mae": [
+          "mae"
+        ],
+        "mfe": [
+          "mfe"
+        ],
+        "near_miss": [
+          "near_miss"
+        ],
+        "net_rr": [
+          "net_rr"
+        ],
+        "gross_rr": [
+          "gross_rr"
+        ],
+        "estimated_cost": [
+          "estimated_cost"
+        ],
+        "reason_if_rejected": [
+          "reason_if_rejected"
+        ],
+        "score": [
+          "score"
+        ],
+        "min_score": [
+          "min_score"
+        ],
+        "setup_type": [
+          "setup_type"
+        ],
+        "side": [
+          "side"
+        ],
+        "would_send_signal": [
+          "would_send_signal"
+        ],
+        "adaptive_thresholds": [
+          "adaptive_thresholds"
+        ],
+        "ofa_funnel": [
+          "ofa_funnel"
+        ],
+        "execution_context": [
+          "execution_context"
+        ],
+        "risk_context": [
+          "risk_context"
+        ],
+        "market_regime": [
+          "market_regime",
+          "regime"
+        ],
+        "shadow_lifecycle_candles_evaluated": [
+          "shadow_lifecycle_candles_evaluated"
+        ],
+        "shadow_lifecycle_source": [
+          "shadow_lifecycle_source"
+        ],
+        "shadow_snapshot_id": [
+          "shadow_snapshot_id"
+        ]
+      }
+    },
+    "shadow_diagnostics": {
+      "table": "scanner_shadow_diagnostics",
+      "role": "scanner_cycle_aggregate_shadow_diagnostics",
+      "primary_key": "id",
+      "timestamp": "created_at",
+      "generated_at_ms": "generated_at_ms",
+      "mode": "mode",
+      "pairs_total": "pairs_total",
+      "pairs_to_scan": "pairs_to_scan",
+      "valid_candidates": "valid_candidates",
+      "sent": "sent",
+      "rejected_total": "rejected_total",
+      "reason_counts_json": "reason_counts_json",
+      "adx_threshold_counts_json": "adx_threshold_counts_json",
+      "rvol_threshold_counts_json": "rvol_threshold_counts_json",
+      "score_threshold_counts_json": "score_threshold_counts_json",
+      "near_misses_json": "near_misses_json",
+      "universe_json": "universe_json",
+      "metadata_json": "metadata_json"
+    },
+    "scan_cycles": {
+      "table": "signal_scan_cycles",
+      "role": "scanner_cycle_health_and_top_candidates",
+      "primary_key": "id",
+      "timestamp": "created_at",
+      "pairs_total": "pairs_total",
+      "pairs_to_scan": "pairs_to_scan",
+      "valid_candidates": "valid_candidates",
+      "sent_signals": "sent_signals",
+      "rejected_total": "rejected_total",
+      "rejected_no_setup": "rejected_no_setup",
+      "rejected_below_min_score": "rejected_below_min_score",
+      "rejected_direction_limit": "rejected_direction_limit",
+      "rejected_duplicate": "rejected_duplicate",
+      "rejected_invalid_result": "rejected_invalid_result",
+      "analysis_errors": "analysis_errors",
+      "avg_candidate_score": "avg_candidate_score",
+      "weekend": "weekend",
+      "killzone": "killzone",
+      "no_setup_reasons_json": "no_setup_reasons_json",
+      "strategy_version": "strategy_version",
+      "operating_mode": "operating_mode",
+      "min_score_required": "min_score_required",
+      "btc_trend": "btc_trend",
+      "elapsed_seconds": "elapsed_seconds",
+      "top_candidates_json": "top_candidates_json",
+      "rejected_near_threshold": "rejected_near_threshold"
+    },
+    "paper_trades": {
+      "table": "paper_trades",
+      "role": "secondary_paper_trade_outcomes",
+      "primary_key": "id",
+      "source_signal_id": "source_signal_id",
+      "timestamp": "created_at",
+      "closed_at_ms": "closed_at_ms",
+      "symbol": "symbol",
+      "side": "side",
+      "status": "status",
+      "entry_price": "entry_price",
+      "tp_price": "tp_price",
+      "sl_price": "sl_price",
+      "gross_r": "gross_r",
+      "net_r": "net_r",
+      "metadata_json": "metadata_json"
+    },
+    "paper_trade_fills": {
+      "table": "paper_trade_fills",
+      "role": "secondary_paper_trade_fills",
+      "primary_key": "id",
+      "paper_trade_db_id": "paper_trade_db_id",
+      "timestamp": "created_at",
+      "fill_type": "fill_type",
+      "price": "price",
+      "quantity": "quantity",
+      "fee_paid": "fee_paid",
+      "slippage_pct": "slippage_pct",
+      "metadata_json": "metadata_json"
+    }
+  },
+  "daily_fact_fields": {
+    "identity": [
+      "record_type",
+      "signal_id",
+      "candidate_id",
+      "cycle_id",
+      "created_at",
+      "source_table"
+    ],
+    "market": [
+      "symbol",
+      "side",
+      "setup_type",
+      "engine_name",
+      "operating_mode",
+      "market_regime",
+      "btc_trend",
+      "weekend",
+      "killzone"
+    ],
+    "score_and_filters": [
+      "score",
+      "min_score",
+      "score_margin",
+      "adx",
+      "rvol",
+      "atr_extension",
+      "passed_adx_18",
+      "passed_adx_20",
+      "passed_adx_22",
+      "passed_rvol_1_0",
+      "passed_rvol_1_1",
+      "passed_rvol_1_2",
+      "liquidity_zone_ok",
+      "sweep_ok",
+      "reclaim_ok",
+      "execution_ok",
+      "risk_ok",
+      "signal_complete",
+      "telegram_notified",
+      "lifecycle_started"
+    ],
+    "geometry": [
+      "entry_price",
+      "tp_price",
+      "primary_tp_price",
+      "sl_price",
+      "primary_tp_distance",
+      "sl_distance",
+      "gross_rr",
+      "net_rr",
+      "estimated_cost"
+    ],
+    "decision": [
+      "sent_to_telegram",
+      "blocked",
+      "blocked_reason",
+      "near_miss",
+      "would_send_signal",
+      "reason_if_rejected",
+      "hypothetical_result",
+      "hypothetical_exit_reason"
+    ],
+    "outcome": [
+      "status",
+      "official_result",
+      "official_result_locked",
+      "exit_reason",
+      "primary_tp_hit",
+      "real_stop_loss_hit",
+      "breakeven_stop_hit",
+      "runner_tp_hit",
+      "runner_breakeven_stop_hit",
+      "time_stop_exit",
+      "cancelled",
+      "no_progress_exit",
+      "mfe_stall_exit",
+      "pnl_r",
+      "gross_r",
+      "net_r",
+      "runner_extra_r",
+      "mfe",
+      "mae"
+    ],
+    "timing": [
+      "opened_at",
+      "closed_at",
+      "expires_at",
+      "time_to_entry_minutes",
+      "time_to_primary_tp_minutes",
+      "time_to_close_minutes"
+    ]
+  },
+  "report_outputs": [
+    "01_executive_summary.md",
+    "02_daily_signal_facts.csv",
+    "03_blocked_candidates.csv",
+    "04_winners_vs_losers.csv",
+    "05_filter_funnel.csv",
+    "06_near_misses.csv",
+    "07_lifecycle_events.csv",
+    "08_strategy_hypotheses.json",
+    "09_ai_prompt.md",
+    "10_ai_review_pack_part_01.txt",
+    "AI_REVIEW_YYYY-MM-DD.zip"
+  ]
+}

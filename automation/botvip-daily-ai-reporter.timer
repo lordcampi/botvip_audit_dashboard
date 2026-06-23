@@ -1,0 +1,10 @@
+[Unit]
+Description=Run BotVIP Daily AI Reporter every day at 10:00 UTC / 5:00 Colombia
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 UTC
+Persistent=true
+Unit=botvip-daily-ai-reporter.service
+
+[Install]
+WantedBy=timers.target
