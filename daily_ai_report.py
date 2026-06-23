@@ -8,6 +8,7 @@ from pathlib import Path
 from src.ai_pack_builder import build_ai_prompt, build_ai_review_pack, build_executive_summary
 from src.daily_facts import build_daily_facts, write_facts_csv
 from src.db_readonly import assert_readonly, connect_readonly, get_db_path
+from src.deep_diagnostics import compute_deep_diagnostics, write_deep_diagnostics
 from src.f4_t11a_audit import audit_f4_t11a_semantics
 from src.hypothesis_builder import build_strategy_hypotheses, write_strategy_hypotheses
 from src.lifecycle_metrics import compute_lifecycle_metrics
@@ -61,6 +62,7 @@ def main() -> int:
     funnel_rows.extend(compute_filter_funnel(facts, record_type="candidate"))
     near_misses = select_near_misses(facts, limit=200)
     hypotheses = build_strategy_hypotheses(lifecycle, blocked_summary, winners_losers_rows, near_misses)
+    diagnostics = compute_deep_diagnostics(facts)
 
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
@@ -81,6 +83,8 @@ def main() -> int:
         hypotheses,
     )
 
+    ai_pack += "\n## 13. Deep diagnostics\n```json\n" + json.dumps(diagnostics, indent=2, ensure_ascii=False, default=str) + "\n```\n"
+
     summary = {
         "window": {"label": window.label, "start": window.start_text, "end": window.end_text},
         "rows": {"events": len(events), "signals": len(signals), "candidates": len(candidates), "facts": len(facts)},
@@ -88,6 +92,7 @@ def main() -> int:
         "audit": audit,
         "blocked_summary": blocked_summary,
         "hypotheses_count": len(hypotheses),
+        "deep_diagnostics": diagnostics,
     }
 
     if args.dry_run:
@@ -110,18 +115,35 @@ def main() -> int:
     written.append(write_rows_csv(events, report_dir / "07_lifecycle_events.csv"))
     write_strategy_hypotheses(hypotheses, report_dir / "08_strategy_hypotheses.json")
     written.append(report_dir / "08_strategy_hypotheses.json")
+    write_deep_diagnostics(diagnostics, report_dir / "11_deep_diagnostics.json")
+    written.append(report_dir / "11_deep_diagnostics.json")
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
-    written.append(write_json(summary, report_dir / "report_manifest.json"))
+    ai_readme = '# BotVIP AI Review Pack - READ ME FIRST\n\nThis ZIP is optimized for Copilot/GPT deep review.\n\nUpload these files to the AI:\n\n1. 10_ai_review_pack_part_01.txt\n2. 10_ai_review_pack_part_02.txt, if present\n3. 11_deep_diagnostics.json\n4. 08_strategy_hypotheses.json\n5. report_manifest.json\n6. 01_executive_summary.md, optional but useful\n\nDo NOT upload CSV files unless the AI explicitly asks for them.\nThe CSV files are generated in the server report folder for audit/debugging,\nbut they are intentionally excluded from this AI ZIP because they are too large\nfor practical Copilot/GPT review.\n\nAnalysis rules:\n- Do not recommend real trading.\n- Do not propose automatic threshold changes.\n- Treat single-day samples as weak or preliminary evidence.\n- PRIMARY_TP_HIT is the official WIN.\n- Breakeven is not a real STOP_LOSS.\n- Runner/TP2 cannot invalidate an official WIN.\n- Use near-miss and no-progress diagnostics only for shadow hypotheses.\n'
+    ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
+    manifest_path = write_json(summary, report_dir / "report_manifest.json")
+    written.append(manifest_path)
+
+    ai_zip_files = [
+        ai_readme_path,
+        report_dir / "01_executive_summary.md",
+        report_dir / "08_strategy_hypotheses.json",
+        report_dir / "09_ai_prompt.md",
+        report_dir / "11_deep_diagnostics.json",
+        manifest_path,
+    ]
+    ai_zip_files.extend(ai_parts)
+    ai_zip_files = [p for p in ai_zip_files if Path(p).exists()]
 
     zip_path = report_dir / f"AI_REVIEW_{report_date}.zip"
-    create_zip(written, zip_path, base_dir=report_dir)
+    create_zip(ai_zip_files, zip_path, base_dir=report_dir)
 
     print(json.dumps({
         "report_dir": str(report_dir),
         "zip_path": str(zip_path),
-        "files_written": [str(p) for p in written] + [str(zip_path)],
+        "files_written": [str(p) for p in written] + [str(ai_readme_path)] + [str(zip_path)],
+        "ai_zip_files": [str(p) for p in ai_zip_files],
         "summary": summary,
     }, indent=2, ensure_ascii=False, default=str))
     print("OK: Daily AI Reporter pack generated")

@@ -66,3 +66,6 @@ schema_discovery_report.txt
 # Local schema backups
 /config/*.backup.json
 /config/schema_map.backup.json
+
+# Local patch backups
+*.f5_t20_backup
