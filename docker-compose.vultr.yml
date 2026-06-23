@@ -1,0 +1,18 @@
+﻿services:
+  reporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: botvip-daily-ai-reporter:latest
+    environment:
+      DB_PATH: /botvip_data/trading_bot.db
+    volumes:
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+      - botvip_botvip_data:/botvip_data:ro
+    command: ["python", "automation/run_daily_ai_report.py", "--window", "daily", "--output", "reports", "--max-ai-chars", "120000"]
+    restart: "no"
+
+volumes:
+  botvip_botvip_data:
+    external: true

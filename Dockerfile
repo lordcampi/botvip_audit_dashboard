@@ -1,1 +1,16 @@
-FROM python:3.12-slim\n\nENV PYTHONDONTWRITEBYTECODE=1 \\\n    PYTHONUNBUFFERED=1 \\\n    PIP_NO_CACHE_DIR=1\n\nWORKDIR /app\n\nCOPY requirements.txt /app/requirements.txt\nRUN pip install --no-cache-dir -r /app/requirements.txt\n\nCOPY . /app\n\nRUN python -m py_compile daily_ai_report.py automation/run_daily_ai_report.py\n\nCMD ["python", "automation/run_daily_ai_report.py", "--window", "daily", "--output", "reports", "--max-ai-chars", "120000"]\n
+﻿FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY . /app
+
+RUN python -m py_compile daily_ai_report.py automation/run_daily_ai_report.py
+
+CMD ["python", "automation/run_daily_ai_report.py", "--window", "daily", "--output", "reports", "--max-ai-chars", "120000"]
