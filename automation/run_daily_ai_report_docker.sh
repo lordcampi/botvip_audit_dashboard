@@ -1,0 +1,1 @@
+#!/usr/bin/env bash\nset -euo pipefail\nROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\ncd "$ROOT"\nmkdir -p reports logs\nexec docker compose -f docker-compose.reporter.yml run --rm reporter\n
