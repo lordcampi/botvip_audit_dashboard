@@ -19,6 +19,7 @@ from src.rejection_analysis import compute_blocked_analysis, write_blocked_candi
 from src.report_writer import create_zip, write_json, write_rows_csv, write_text
 from src.schema_mapper import SchemaMap
 from src.text_splitter import write_split_text
+from src.t02_diagnostics import compute_t02_diagnostics, write_t02_diagnostics
 from src.time_windows import parse_window
 from src.winners_losers import compare_winners_losers, write_winners_losers_csv
 
@@ -63,6 +64,7 @@ def main() -> int:
     near_misses = select_near_misses(facts, limit=200)
     hypotheses = build_strategy_hypotheses(lifecycle, blocked_summary, winners_losers_rows, near_misses)
     diagnostics = compute_deep_diagnostics(facts)
+    t02_diagnostics = compute_t02_diagnostics(facts)
 
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
@@ -85,6 +87,8 @@ def main() -> int:
 
     ai_pack += "\n## 13. Deep diagnostics\n```json\n" + json.dumps(diagnostics, indent=2, ensure_ascii=False, default=str) + "\n```\n"
 
+    ai_pack += "\n## 14. T02 diagnostics\n```json\n" + json.dumps(t02_diagnostics, indent=2, ensure_ascii=False, default=str) + "\n```\n"
+
     summary = {
         "window": {"label": window.label, "start": window.start_text, "end": window.end_text},
         "rows": {"events": len(events), "signals": len(signals), "candidates": len(candidates), "facts": len(facts)},
@@ -92,6 +96,7 @@ def main() -> int:
         "audit": audit,
         "blocked_summary": blocked_summary,
         "hypotheses_count": len(hypotheses),
+        "t02_diagnostics": t02_diagnostics,
         "deep_diagnostics": diagnostics,
     }
 
@@ -117,6 +122,8 @@ def main() -> int:
     written.append(report_dir / "08_strategy_hypotheses.json")
     write_deep_diagnostics(diagnostics, report_dir / "11_deep_diagnostics.json")
     written.append(report_dir / "11_deep_diagnostics.json")
+    write_t02_diagnostics(t02_diagnostics, report_dir / "12_t02_no_progress_reclaim_zone_pf.json")
+    written.append(report_dir / "12_t02_no_progress_reclaim_zone_pf.json")
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -131,6 +138,7 @@ def main() -> int:
         report_dir / "08_strategy_hypotheses.json",
         report_dir / "09_ai_prompt.md",
         report_dir / "11_deep_diagnostics.json",
+        report_dir / "12_t02_no_progress_reclaim_zone_pf.json",
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
