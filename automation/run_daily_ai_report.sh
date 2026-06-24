@@ -6,5 +6,6 @@ PY="$ROOT/.venv/bin/python"
 if [ ! -x "$PY" ]; then
   PY="python3"
 fi
-exec "$PY" "$ROOT/automation/run_daily_ai_report.py" --window daily --output reports --max-ai-chars 95000
+exec "$PY" "$ROOT/automation/run_daily_ai_report.py" --window daily --output reports --max-ai-chars 120000
+
 

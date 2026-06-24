@@ -4,7 +4,7 @@ Reporting-only utility. It does not read or write the BotVIP DB and does not
 change strategy, thresholds, scanner, lifecycle, Telegram runtime, or schema.
 
 Invariant for AI_REVIEW zip packages:
-- No generated text file included in the ZIP may exceed max_chars characters.
+- No generated text file included in the ZIP may exceed max_chars characters. For Copilot paste workflows, paste one generated part per chat message.
 - Large JSON files are split into valid deterministic JSON parts.
 - Large CSV files are split by rows with headers preserved.
 - Large TXT/MD files are split by lines.
@@ -19,8 +19,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Iterable
 
-DEFAULT_ZIP_CHAR_LIMIT = 100000
-DEFAULT_SAFE_TARGET_CHARS = 95000
+DEFAULT_ZIP_CHAR_LIMIT = 128000
+DEFAULT_SAFE_TARGET_CHARS = 120000
 TEXT_SUFFIXES = {".json", ".csv", ".txt", ".md", ".log"}
 
 
@@ -600,3 +600,4 @@ def prepare_zip_files_for_char_limit(
     final_files = _dedupe_paths(final_files)
     validate_zip_input_char_limit(final_files, max_chars=max_chars)
     return final_files
+

@@ -17,7 +17,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run BotVIP Daily AI Reporter batch safely.")
     parser.add_argument("--window", default="daily")
     parser.add_argument("--output", default="reports")
-    parser.add_argument("--max-ai-chars", type=int, default=95000)
+    parser.add_argument("--max-ai-chars", type=int, default=120000)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -71,5 +71,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
