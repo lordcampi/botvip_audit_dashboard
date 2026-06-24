@@ -17,6 +17,11 @@ from src.f5_t04bcd_diagnostics import (
     ZONE_MAPPING_QUALITY_FILENAME,
     build_f5_t04bcd_diagnostics,
 )
+from src.f5_t04e_insights import (
+    AI_INSIGHT_SUMMARY_FILENAME,
+    LOSS_CONTRIBUTION_FILENAME,
+    build_f5_t04e_outputs,
+)
 from src.deep_diagnostics import compute_deep_diagnostics, write_deep_diagnostics
 from src.f4_t11a_audit import audit_f4_t11a_semantics
 from src.hypothesis_builder import build_strategy_hypotheses, write_strategy_hypotheses
@@ -90,6 +95,13 @@ def main() -> int:
         signals=signals,
         candidates=candidates,
     )
+    f5_t04e_outputs = build_f5_t04e_outputs(
+        facts=facts,
+        lifecycle=lifecycle,
+        blocked_summary=blocked_summary,
+        t02_diagnostics=t02_diagnostics,
+        f5_t04bcd_sections=f5_t04bcd_sections,
+    )
 
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
@@ -138,6 +150,14 @@ def main() -> int:
             ],
             "read_only": True,
         },
+        "f5_t04e_batch3_sections": {
+            "schema_version": "f5_t04e_loss_contribution_ai_insight_v1",
+            "files": [
+                LOSS_CONTRIBUTION_FILENAME,
+                AI_INSIGHT_SUMMARY_FILENAME,
+            ],
+            "read_only": True,
+        },
     }
 
     if args.dry_run:
@@ -174,6 +194,10 @@ def main() -> int:
     written.append(zone_mapping_quality_path)
     entity_scope_reconciliation_path = write_json(f5_t04bcd_sections["entity_scope_reconciliation"], report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME)
     written.append(entity_scope_reconciliation_path)
+    loss_contribution_path = write_json(f5_t04e_outputs["loss_contribution"], report_dir / LOSS_CONTRIBUTION_FILENAME)
+    written.append(loss_contribution_path)
+    ai_insight_summary_path = write_json(f5_t04e_outputs["ai_insight_summary"], report_dir / AI_INSIGHT_SUMMARY_FILENAME)
+    written.append(ai_insight_summary_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -194,6 +218,8 @@ def main() -> int:
         report_dir / ZONE_DIAGNOSTICS_V2_FILENAME,
         report_dir / ZONE_MAPPING_QUALITY_FILENAME,
         report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME,
+        report_dir / LOSS_CONTRIBUTION_FILENAME,
+        report_dir / AI_INSIGHT_SUMMARY_FILENAME,
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
