@@ -152,6 +152,7 @@ def _append_item_chunks(
 
 
 
+
 def _json_path_name(path: tuple[str, ...]) -> str:
     if not path:
         return "root"
@@ -162,153 +163,179 @@ def _json_path_name(path: tuple[str, ...]) -> str:
     return "_".join(safe)[:80]
 
 
-def _write_json_parts_for_items(
+def _json_nested_entry(
     *,
     original: Path,
-    items: list[Any],
-    make_payload,
+    key_path: tuple[str, ...],
+    value: Any,
+    base_dir: Path,
+    content_type: str = "json_value",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    entry = {
+        "json_path": list(key_path),
+        "path_name": _json_path_name(key_path),
+        "content_type": content_type,
+        "value": value,
+    }
+    if extra:
+        entry.update(extra)
+    return entry
+
+
+def _entry_payload(original: Path, base_dir: Path, entry: dict[str, Any], part_number: int) -> dict[str, Any]:
+    return {
+        "schema_version": "f5_t04a_json_compact_part_v1",
+        "split_from": _relative_name(original, base_dir),
+        "part_number": part_number,
+        "content_type": "json_compact_entries",
+        "entries": [entry],
+    }
+
+
+def _bundle_payload(original: Path, base_dir: Path, entries: list[dict[str, Any]], part_number: int) -> dict[str, Any]:
+    return {
+        "schema_version": "f5_t04a_json_compact_part_v1",
+        "split_from": _relative_name(original, base_dir),
+        "part_number": part_number,
+        "content_type": "json_compact_entries",
+        "entry_count": len(entries),
+        "entries": entries,
+    }
+
+
+def _split_large_string_entry(
+    *,
+    original: Path,
+    key_path: tuple[str, ...],
+    value: str,
     base_dir: Path,
     max_chars: int,
-    part_paths: list[Path],
-) -> None:
-    current: list[Any] = []
-
-    def flush() -> None:
-        if not current:
-            return
-        part_path = _part_name(original, len(part_paths) + 1)
-        text = _json_dumps(make_payload(list(current), len(part_paths) + 1))
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    chunk_size = max(1000, max_chars - 5000)
+    for offset in range(0, len(value), chunk_size):
+        fragment = value[offset:offset + chunk_size]
+        entry = {
+            "json_path": list(key_path),
+            "path_name": _json_path_name(key_path),
+            "content_type": "json_string_fragment",
+            "fragment_start": offset,
+            "fragment": fragment,
+        }
+        text = _json_dumps(_entry_payload(original, base_dir, entry, 1))
         if len(text) > max_chars:
-            raise ValueError(f"Single JSON generated chunk exceeds limit for {original}")
-        _write_text(part_path, text)
-        part_paths.append(part_path)
-        current.clear()
+            smaller = max(1000, chunk_size // 2)
+            if smaller == chunk_size:
+                raise ValueError(f"Single JSON string fragment exceeds limit for {original}")
+            for sub_offset in range(offset, min(offset + chunk_size, len(value)), smaller):
+                sub_fragment = value[sub_offset:sub_offset + smaller]
+                sub_entry = {
+                    "json_path": list(key_path),
+                    "path_name": _json_path_name(key_path),
+                    "content_type": "json_string_fragment",
+                    "fragment_start": sub_offset,
+                    "fragment": sub_fragment,
+                }
+                sub_text = _json_dumps(_entry_payload(original, base_dir, sub_entry, 1))
+                if len(sub_text) > max_chars:
+                    raise ValueError(f"Single JSON string sub-fragment exceeds limit for {original}")
+                entries.append(sub_entry)
+            continue
+        entries.append(entry)
+    return entries
 
-    for item in items:
-        tentative = current + [item]
-        text = _json_dumps(make_payload(tentative, len(part_paths) + 1))
-        if len(text) > max_chars and current:
-            flush()
-            tentative = [item]
-            text = _json_dumps(make_payload(tentative, len(part_paths) + 1))
-        if len(text) > max_chars:
-            raise ValueError(f"Single JSON item exceeds limit for nested splitter in {original}")
-        current.append(item)
-    flush()
 
-
-def _split_json_value_recursive(
+def _collect_json_compact_entries(
     *,
     original: Path,
     key_path: tuple[str, ...],
     value: Any,
     base_dir: Path,
     max_chars: int,
-    part_paths: list[Path],
-) -> None:
-    base_payload = {
-        "schema_version": "f5_t04a_json_nested_part_v1",
-        "split_from": _relative_name(original, base_dir),
-        "json_path": list(key_path),
-        "path_name": _json_path_name(key_path),
-        "content_type": "json_value",
-        "value": value,
-    }
-    base_text = _json_dumps(base_payload)
-    if len(base_text) <= max_chars:
-        part_path = _part_name(original, len(part_paths) + 1)
-        _write_text(part_path, base_text)
-        part_paths.append(part_path)
-        return
+) -> list[dict[str, Any]]:
+    entry = _json_nested_entry(original=original, key_path=key_path, value=value, base_dir=base_dir)
+    text = _json_dumps(_entry_payload(original, base_dir, entry, 1))
+    if len(text) <= max_chars:
+        return [entry]
+
+    if isinstance(value, dict):
+        entries: list[dict[str, Any]] = []
+        for key in sorted(value.keys(), key=lambda item: str(item)):
+            entries.extend(
+                _collect_json_compact_entries(
+                    original=original,
+                    key_path=key_path + (str(key),),
+                    value=value[key],
+                    base_dir=base_dir,
+                    max_chars=max_chars,
+                )
+            )
+        return entries
 
     if isinstance(value, list):
-        def make_payload(chunk: list[Any], part_number: int) -> dict[str, Any]:
-            return {
-                "schema_version": "f5_t04a_json_nested_part_v1",
-                "split_from": _relative_name(original, base_dir),
-                "part_number": part_number,
-                "json_path": list(key_path),
-                "path_name": _json_path_name(key_path),
-                "content_type": "json_list_items",
-                "items": chunk,
-            }
-        try:
-            _write_json_parts_for_items(
-                original=original,
-                items=list(value),
-                make_payload=make_payload,
-                base_dir=base_dir,
-                max_chars=max_chars,
-                part_paths=part_paths,
-            )
-            return
-        except ValueError:
-            for idx, item in enumerate(value):
-                _split_json_value_recursive(
+        entries = []
+        for idx, item in enumerate(value):
+            entries.extend(
+                _collect_json_compact_entries(
                     original=original,
                     key_path=key_path + (str(idx),),
                     value=item,
                     base_dir=base_dir,
                     max_chars=max_chars,
-                    part_paths=part_paths,
                 )
-            return
-
-    if isinstance(value, dict):
-        items = list(value.items())
-        def make_payload(chunk: list[tuple[str, Any]], part_number: int) -> dict[str, Any]:
-            return {
-                "schema_version": "f5_t04a_json_nested_part_v1",
-                "split_from": _relative_name(original, base_dir),
-                "part_number": part_number,
-                "json_path": list(key_path),
-                "path_name": _json_path_name(key_path),
-                "content_type": "json_dict_top_level_keys",
-                "data": {k: v for k, v in chunk},
-            }
-        try:
-            _write_json_parts_for_items(
-                original=original,
-                items=items,
-                make_payload=make_payload,
-                base_dir=base_dir,
-                max_chars=max_chars,
-                part_paths=part_paths,
             )
-            return
-        except ValueError:
-            for key, item in items:
-                _split_json_value_recursive(
-                    original=original,
-                    key_path=key_path + (str(key),),
-                    value=item,
-                    base_dir=base_dir,
-                    max_chars=max_chars,
-                    part_paths=part_paths,
-                )
-            return
+        return entries
 
     if isinstance(value, str):
-        chunk_size = max(1000, max_chars - 1000)
-        for offset in range(0, len(value), chunk_size):
-            part_path = _part_name(original, len(part_paths) + 1)
-            payload = {
-                "schema_version": "f5_t04a_json_nested_part_v1",
-                "split_from": _relative_name(original, base_dir),
-                "json_path": list(key_path),
-                "path_name": _json_path_name(key_path),
-                "content_type": "json_string_fragment",
-                "fragment_start": offset,
-                "fragment": value[offset:offset + chunk_size],
-            }
-            text = _json_dumps(payload)
-            if len(text) > max_chars:
-                raise ValueError(f"Single JSON string fragment exceeds limit for {original}")
-            _write_text(part_path, text)
-            part_paths.append(part_path)
-        return
+        return _split_large_string_entry(
+            original=original,
+            key_path=key_path,
+            value=value,
+            base_dir=base_dir,
+            max_chars=max_chars,
+        )
 
     raise ValueError(f"Unsupported oversized scalar JSON value for {original} at {key_path}")
+
+
+def _write_compact_json_entry_parts(
+    *,
+    original: Path,
+    entries: list[dict[str, Any]],
+    base_dir: Path,
+    max_chars: int,
+) -> list[Path]:
+    parts: list[Path] = []
+    current: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        if not current:
+            return
+        part_path = _part_name(original, len(parts) + 1)
+        text = _json_dumps(_bundle_payload(original, base_dir, list(current), len(parts) + 1))
+        if len(text) > max_chars:
+            raise ValueError(f"Generated compact JSON part exceeds limit for {original}")
+        _write_text(part_path, text)
+        parts.append(part_path)
+        current.clear()
+
+    for entry in entries:
+        single_text = _json_dumps(_entry_payload(original, base_dir, entry, len(parts) + 1))
+        if len(single_text) > max_chars:
+            raise ValueError(f"Single compact JSON entry exceeds limit for {original}: {entry.get('json_path')}")
+
+        tentative = current + [entry]
+        tentative_text = _json_dumps(_bundle_payload(original, base_dir, tentative, len(parts) + 1))
+        if len(tentative_text) > max_chars and current:
+            flush()
+            tentative = [entry]
+            tentative_text = _json_dumps(_bundle_payload(original, base_dir, tentative, len(parts) + 1))
+        if len(tentative_text) > max_chars:
+            raise ValueError(f"Single compact JSON bundle exceeds limit for {original}")
+        current.append(entry)
+    flush()
+    return parts
 
 
 def split_json_file(path: Path, *, base_dir: Path, max_chars: int = DEFAULT_ZIP_CHAR_LIMIT) -> ChunkResult:
@@ -317,58 +344,20 @@ def split_json_file(path: Path, *, base_dir: Path, max_chars: int = DEFAULT_ZIP_
         return ChunkResult(_relative_name(path, base_dir), [path], None, False, original_chars, max_chars, "none")
 
     data = json.loads(_read_text(path))
-    part_paths: list[Path] = []
 
-    if isinstance(data, dict):
-        strategy = "json_nested_recursive"
-        for key, value in data.items():
-            _split_json_value_recursive(
-                original=path,
-                key_path=(str(key),),
-                value=value,
-                base_dir=base_dir,
-                max_chars=max_chars,
-                part_paths=part_paths,
-            )
-    elif isinstance(data, list):
-        strategy = "json_list_nested_recursive"
-        try:
-            _write_json_parts_for_items(
-                original=path,
-                items=list(data),
-                base_dir=base_dir,
-                max_chars=max_chars,
-                part_paths=part_paths,
-                make_payload=lambda chunk, part: {
-                    "schema_version": "f5_t04a_json_nested_part_v1",
-                    "split_from": _relative_name(path, base_dir),
-                    "part_number": part,
-                    "json_path": [],
-                    "path_name": "root",
-                    "content_type": "json_list_items",
-                    "items": chunk,
-                },
-            )
-        except ValueError:
-            for idx, item in enumerate(data):
-                _split_json_value_recursive(
-                    original=path,
-                    key_path=(str(idx),),
-                    value=item,
-                    base_dir=base_dir,
-                    max_chars=max_chars,
-                    part_paths=part_paths,
-                )
-    else:
-        strategy = "json_scalar_recursive"
-        _split_json_value_recursive(
-            original=path,
-            key_path=("root",),
-            value=data,
-            base_dir=base_dir,
-            max_chars=max_chars,
-            part_paths=part_paths,
-        )
+    entries = _collect_json_compact_entries(
+        original=path,
+        key_path=(),
+        value=data,
+        base_dir=base_dir,
+        max_chars=max_chars,
+    )
+    part_paths = _write_compact_json_entry_parts(
+        original=path,
+        entries=entries,
+        base_dir=base_dir,
+        max_chars=max_chars,
+    )
 
     index_path = _write_index(
         original=path,
@@ -376,7 +365,7 @@ def split_json_file(path: Path, *, base_dir: Path, max_chars: int = DEFAULT_ZIP_
         base_dir=base_dir,
         max_chars=max_chars,
         original_chars=original_chars,
-        strategy=strategy,
+        strategy="json_compact_nested_entries",
     )
     return ChunkResult(
         original_file=_relative_name(path, base_dir),
@@ -385,7 +374,7 @@ def split_json_file(path: Path, *, base_dir: Path, max_chars: int = DEFAULT_ZIP_
         was_split=True,
         original_chars=original_chars,
         max_chars=max_chars,
-        strategy=strategy,
+        strategy="json_compact_nested_entries",
     )
 
 def split_csv_file(path: Path, *, base_dir: Path, max_chars: int = DEFAULT_ZIP_CHAR_LIMIT) -> ChunkResult:
