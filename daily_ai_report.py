@@ -10,6 +10,13 @@ from src.daily_facts import build_daily_facts, write_facts_csv
 from src.db_readonly import assert_readonly, connect_readonly, get_db_path
 from src.f5_t03b_sections import FILENAME as F5_T03B_SECTIONS_FILENAME
 from src.f5_t03b_sections import build_f5_t03b_integration_sections
+from src.f5_t04bcd_diagnostics import (
+    ENTITY_SCOPE_RECONCILIATION_FILENAME,
+    NO_PROGRESS_ROOT_CAUSE_FILENAME,
+    ZONE_DIAGNOSTICS_V2_FILENAME,
+    ZONE_MAPPING_QUALITY_FILENAME,
+    build_f5_t04bcd_diagnostics,
+)
 from src.deep_diagnostics import compute_deep_diagnostics, write_deep_diagnostics
 from src.f4_t11a_audit import audit_f4_t11a_semantics
 from src.hypothesis_builder import build_strategy_hypotheses, write_strategy_hypotheses
@@ -77,6 +84,12 @@ def main() -> int:
         diagnostics=diagnostics,
         t02_diagnostics=t02_diagnostics,
     )
+    f5_t04bcd_sections = build_f5_t04bcd_diagnostics(
+        facts=facts,
+        events=events,
+        signals=signals,
+        candidates=candidates,
+    )
 
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
@@ -115,6 +128,16 @@ def main() -> int:
             "schema_version": f5_t03b_sections.get("schema_version"),
             "source": f5_t03b_sections.get("source"),
         },
+        "f5_t04bcd_batch2_sections": {
+            "schema_version": "f5_t04bcd_batch2_diagnostics_v1",
+            "files": [
+                NO_PROGRESS_ROOT_CAUSE_FILENAME,
+                ZONE_DIAGNOSTICS_V2_FILENAME,
+                ZONE_MAPPING_QUALITY_FILENAME,
+                ENTITY_SCOPE_RECONCILIATION_FILENAME,
+            ],
+            "read_only": True,
+        },
     }
 
     if args.dry_run:
@@ -143,10 +166,18 @@ def main() -> int:
     written.append(report_dir / "12_t02_no_progress_reclaim_zone_pf.json")
     f5_t03b_sections_path = write_json(f5_t03b_sections, report_dir / F5_T03B_SECTIONS_FILENAME)
     written.append(f5_t03b_sections_path)
+    no_progress_root_cause_path = write_json(f5_t04bcd_sections["no_progress_root_cause_diagnostics"], report_dir / NO_PROGRESS_ROOT_CAUSE_FILENAME)
+    written.append(no_progress_root_cause_path)
+    zone_diagnostics_v2_path = write_json(f5_t04bcd_sections["zone_diagnostics_v2"], report_dir / ZONE_DIAGNOSTICS_V2_FILENAME)
+    written.append(zone_diagnostics_v2_path)
+    zone_mapping_quality_path = write_json(f5_t04bcd_sections["zone_mapping_quality"], report_dir / ZONE_MAPPING_QUALITY_FILENAME)
+    written.append(zone_mapping_quality_path)
+    entity_scope_reconciliation_path = write_json(f5_t04bcd_sections["entity_scope_reconciliation"], report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME)
+    written.append(entity_scope_reconciliation_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
-    ai_readme = '# BotVIP AI Review Pack - READ ME FIRST\n\nThis ZIP is optimized for Copilot/GPT deep review.\n\nUpload these files to the AI:\n\n1. 10_ai_review_pack_part_01.txt\n2. 10_ai_review_pack_part_02.txt, if present\n3. 11_deep_diagnostics.json\n4. 08_strategy_hypotheses.json\n5. report_manifest.json\n6. 01_executive_summary.md, optional but useful\n7. f5_t03b_integration_sections.json, consolidated derived diagnostics\n\nDo NOT upload CSV files unless the AI explicitly asks for them.\nThe CSV files are generated in the server report folder for audit/debugging,\nbut they are intentionally excluded from this AI ZIP because they are too large\nfor practical Copilot/GPT review.\n\nAnalysis rules:\n- Do not recommend real trading.\n- Do not propose automatic threshold changes.\n- Treat single-day samples as weak or preliminary evidence.\n- PRIMARY_TP_HIT is the official WIN.\n- Breakeven is not a real STOP_LOSS.\n- Runner/TP2 cannot invalidate an official WIN.\n- Use near-miss and no-progress diagnostics only for shadow hypotheses.\n- Do not double-count CSV rows and f5_t03b_integration_sections.json as independent trades.\n'
+    ai_readme = '# BotVIP AI Review Pack - READ ME FIRST\n\nThis ZIP is optimized for Copilot/GPT deep review.\n\nUpload these files to the AI:\n\n1. 10_ai_review_pack_part_01.txt\n2. 10_ai_review_pack_part_02.txt, if present\n3. 11_deep_diagnostics.json\n4. 08_strategy_hypotheses.json\n5. report_manifest.json\n6. 01_executive_summary.md, optional but useful\n7. f5_t03b_integration_sections.json, consolidated derived diagnostics\n8. 13_no_progress_root_cause_diagnostics.json, no-progress evidence classifier\n9. 14_zone_diagnostics_v2.json and 15_zone_mapping_quality.json, zone repair diagnostics\n10. 16_entity_scope_reconciliation.json, official-vs-derived row scope\n\nDo NOT upload CSV files unless the AI explicitly asks for them.\nThe CSV files are generated in the server report folder for audit/debugging,\nbut they are intentionally excluded from this AI ZIP because they are too large\nfor practical Copilot/GPT review.\n\nAnalysis rules:\n- Do not recommend real trading.\n- Do not propose automatic threshold changes.\n- Treat single-day samples as weak or preliminary evidence.\n- PRIMARY_TP_HIT is the official WIN.\n- Breakeven is not a real STOP_LOSS.\n- Runner/TP2 cannot invalidate an official WIN.\n- Use near-miss and no-progress diagnostics only for shadow hypotheses.\n- Do not double-count CSV rows, dashboard-derived rows, candidates, or diagnostic rows as independent trades.\n- Use entity_scope_reconciliation.json to distinguish official signals from derived analytical rows.\n- Treat zone diagnostics as reporting-only; they do not change runtime strategy decisions.\n'
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
     written.append(manifest_path)
@@ -159,6 +190,10 @@ def main() -> int:
         report_dir / "11_deep_diagnostics.json",
         report_dir / "12_t02_no_progress_reclaim_zone_pf.json",
         report_dir / F5_T03B_SECTIONS_FILENAME,
+        report_dir / NO_PROGRESS_ROOT_CAUSE_FILENAME,
+        report_dir / ZONE_DIAGNOSTICS_V2_FILENAME,
+        report_dir / ZONE_MAPPING_QUALITY_FILENAME,
+        report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME,
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
@@ -187,4 +222,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

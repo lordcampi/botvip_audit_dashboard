@@ -1,4 +1,4 @@
-# BotVIP Daily AI Reporter cron example
+﻿# BotVIP Daily AI Reporter cron example
 # Runs at 10:00 UTC, equivalent to 5:00 a.m. Colombia.
 # Edit PROJECT_ROOT and PYTHON_PATH before installing with crontab -e.
 
@@ -6,4 +6,5 @@ SHELL=/bin/bash
 PROJECT_ROOT=/opt/botvip_audit_dashboard
 PYTHON_PATH=/opt/botvip_audit_dashboard/.venv/bin/python
 
-0 10 * * * cd $PROJECT_ROOT && $PYTHON_PATH automation/run_daily_ai_report.py --window daily --output reports --max-ai-chars 120000 >> logs/daily_ai_report_cron.log 2>&1
+0 10 * * * cd $PROJECT_ROOT && $PYTHON_PATH automation/run_daily_ai_report.py --window daily --output reports --max-ai-chars 95000 >> logs/daily_ai_report_cron.log 2>&1
+

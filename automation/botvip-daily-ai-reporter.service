@@ -1,4 +1,4 @@
-[Unit]
+﻿[Unit]
 Description=BotVIP Daily AI Reporter
 Wants=network-online.target
 After=network-online.target
@@ -6,7 +6,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/botvip_audit_dashboard
-ExecStart=/opt/botvip_audit_dashboard/.venv/bin/python /opt/botvip_audit_dashboard/automation/run_daily_ai_report.py --window daily --output reports --max-ai-chars 120000
+ExecStart=/opt/botvip_audit_dashboard/.venv/bin/python /opt/botvip_audit_dashboard/automation/run_daily_ai_report.py --window daily --output reports --max-ai-chars 95000
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+
