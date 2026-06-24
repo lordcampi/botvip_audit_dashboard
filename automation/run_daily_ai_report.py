@@ -1,10 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.telegram_delivery import send_report_zip_if_enabled
 
@@ -13,11 +17,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run BotVIP Daily AI Reporter batch safely.")
     parser.add_argument("--window", default="daily")
     parser.add_argument("--output", default="reports")
-    parser.add_argument("--max-ai-chars", type=int, default=120000)
+    parser.add_argument("--max-ai-chars", type=int, default=95000)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parents[1]
+    root = ROOT
     logs = root / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     log_path = logs / "daily_ai_report_runner.log"
@@ -67,3 +71,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

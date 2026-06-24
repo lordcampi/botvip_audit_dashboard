@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -19,6 +19,7 @@ from src.near_misses import select_near_misses, write_near_misses_csv
 from src.ofa_funnel import compute_filter_funnel, write_filter_funnel_csv
 from src.rejection_analysis import compute_blocked_analysis, write_blocked_candidates_csv
 from src.report_writer import create_zip, write_json, write_rows_csv, write_text
+from src.safe_zip_chunking import DEFAULT_SAFE_TARGET_CHARS, DEFAULT_ZIP_CHAR_LIMIT, prepare_zip_files_for_char_limit
 from src.schema_mapper import SchemaMap
 from src.text_splitter import write_split_text
 from src.t02_diagnostics import compute_t02_diagnostics, write_t02_diagnostics
@@ -38,7 +39,7 @@ def main() -> int:
     parser.add_argument("--window", default="daily", help="daily, 24h, 12h, 7d. Default: daily 5am Colombia window")
     parser.add_argument("--output", default="reports", help="Output directory. Default: reports")
     parser.add_argument("--db-path", default=None, help="Optional DB path override")
-    parser.add_argument("--max-ai-chars", type=int, default=120000, help="Max characters per AI review pack txt part")
+    parser.add_argument("--max-ai-chars", type=int, default=DEFAULT_SAFE_TARGET_CHARS, help="Max characters per AI review pack txt part")
     parser.add_argument("--dry-run", action="store_true", help="Validate and print summary without writing report files")
     args = parser.parse_args()
 
@@ -162,6 +163,13 @@ def main() -> int:
     ]
     ai_zip_files.extend(ai_parts)
     ai_zip_files = [p for p in ai_zip_files if Path(p).exists()]
+    ai_zip_files = prepare_zip_files_for_char_limit(
+        ai_zip_files,
+        report_dir=report_dir,
+        manifest_path=manifest_path,
+        readme_path=ai_readme_path,
+        max_chars=DEFAULT_ZIP_CHAR_LIMIT,
+    )
 
     zip_path = report_dir / f"AI_REVIEW_{report_date}.zip"
     create_zip(ai_zip_files, zip_path, base_dir=report_dir)
@@ -179,3 +187,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

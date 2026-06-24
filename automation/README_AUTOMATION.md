@@ -1,4 +1,4 @@
-# BotVIP Daily AI Reporter automation
+﻿# BotVIP Daily AI Reporter automation
 
 This folder contains automation helpers for the independent read-only Daily AI Reporter.
 
@@ -13,13 +13,13 @@ Important safety properties:
 Windows PowerShell:
 
 ```powershell
-python .\automation\run_daily_ai_report.py --window daily --output reports --max-ai-chars 120000
+python .\automation\run_daily_ai_report.py --window daily --output reports --max-ai-chars 95000
 ```
 
 Linux:
 
 ```bash
-python3 automation/run_daily_ai_report.py --window daily --output reports --max-ai-chars 120000
+python3 automation/run_daily_ai_report.py --window daily --output reports --max-ai-chars 95000
 ```
 
 ## Dry-run validation
@@ -65,3 +65,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now botvip-daily-ai-reporter.timer
 systemctl list-timers | grep botvip-daily-ai-reporter
 ```
+
