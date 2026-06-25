@@ -25,6 +25,7 @@ from src.f5_t09dfghi_guard_segments import (
     F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME,
     build_f5_t09dfghi_guard_filter_outputs,
 )
+from src.f5_t09e_symbol_alpha import F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME, build_symbol_not_allowed_shadow_alpha
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -141,6 +142,13 @@ def main() -> int:
         candidates=candidates,
     )
 
+    f5_t09e_symbol_alpha = build_symbol_not_allowed_shadow_alpha(
+        facts=facts,
+        events=events,
+        signals=signals,
+        candidates=candidates,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -231,6 +239,13 @@ def main() -> int:
         "purpose": "Measure guard/filter context outcomes without changing runtime behavior.",
     }
 
+    summary["f5_t09e_symbol_not_allowed_shadow_alpha"] = {
+        "schema_version": f5_t09e_symbol_alpha.get("schema_version"),
+        "file": F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME,
+        "read_only": True,
+        "purpose": "Measure alpha in symbol-not-allowed shadow candidates without opening allowlist.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -287,6 +302,8 @@ def main() -> int:
     written.append(atr_extension_outcomes_path)
     btc_bias_reclaim_quality_path = write_json(f5_t09dfghi_outputs["btc_bias_conflict_reclaim_quality"], report_dir / F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME)
     written.append(btc_bias_reclaim_quality_path)
+    symbol_alpha_path = write_json(f5_t09e_symbol_alpha, report_dir / F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME)
+    written.append(symbol_alpha_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -307,6 +324,10 @@ def main() -> int:
         "- 24_copyability_score_bucket_outcome.json, copyability bucket outcomes\n"
         "- 25_atr_extension_shadow_outcomes.json, ATR extension shadow outcomes\n"
         "- 26_btc_bias_conflict_reclaim_quality.json, BTC bias conflict reclaim quality\n"
+    )
+    ai_readme += (
+        "\nAdditional AI review file added by F5_T09e:\n"
+        "- 27_symbol_not_allowed_shadow_alpha.json, symbol-not-allowed shadow alpha ranking without allowlist changes\n"
     )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
@@ -333,6 +354,7 @@ def main() -> int:
         report_dir / F5_T09G_COPYABILITY_BUCKET_OUTCOME_FILENAME,
         report_dir / F5_T09H_ATR_EXTENSION_OUTCOMES_FILENAME,
         report_dir / F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME,
+        report_dir / F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME,
         report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
         manifest_path,
     ]
