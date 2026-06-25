@@ -17,6 +17,14 @@ from src.f5_t09bc_no_progress_mfe import (
     F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME,
     build_f5_t09bc_no_progress_mfe_outputs,
 )
+from src.f5_t09dfghi_guard_segments import (
+    F5_T09D_GUARD_SHADOW_OUTCOME_MATRIX_FILENAME,
+    F5_T09F_LOW_VOL_WINNERS_LOSERS_FILENAME,
+    F5_T09G_COPYABILITY_BUCKET_OUTCOME_FILENAME,
+    F5_T09H_ATR_EXTENSION_OUTCOMES_FILENAME,
+    F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME,
+    build_f5_t09dfghi_guard_filter_outputs,
+)
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -126,6 +134,13 @@ def main() -> int:
         candidates=candidates,
     )
 
+    f5_t09dfghi_outputs = build_f5_t09dfghi_guard_filter_outputs(
+        facts=facts,
+        events=events,
+        signals=signals,
+        candidates=candidates,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -203,6 +218,19 @@ def main() -> int:
         "purpose": "Diagnose no-progress root causes and MFE capture efficiency by exit reason.",
     }
 
+    summary["f5_t09dfghi_guard_filter_segmentation"] = {
+        "schema_version": f5_t09dfghi_outputs["guard_shadow_outcome_matrix"].get("schema_version"),
+        "files": [
+            F5_T09D_GUARD_SHADOW_OUTCOME_MATRIX_FILENAME,
+            F5_T09F_LOW_VOL_WINNERS_LOSERS_FILENAME,
+            F5_T09G_COPYABILITY_BUCKET_OUTCOME_FILENAME,
+            F5_T09H_ATR_EXTENSION_OUTCOMES_FILENAME,
+            F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME,
+        ],
+        "read_only": True,
+        "purpose": "Measure guard/filter context outcomes without changing runtime behavior.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -249,6 +277,16 @@ def main() -> int:
     written.append(no_progress_v3_path)
     mfe_capture_efficiency_path = write_json(f5_t09bc_outputs["mfe_capture_efficiency_by_exit_reason"], report_dir / F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME)
     written.append(mfe_capture_efficiency_path)
+    guard_shadow_matrix_path = write_json(f5_t09dfghi_outputs["guard_shadow_outcome_matrix"], report_dir / F5_T09D_GUARD_SHADOW_OUTCOME_MATRIX_FILENAME)
+    written.append(guard_shadow_matrix_path)
+    low_vol_winners_losers_path = write_json(f5_t09dfghi_outputs["low_vol_winners_vs_losers"], report_dir / F5_T09F_LOW_VOL_WINNERS_LOSERS_FILENAME)
+    written.append(low_vol_winners_losers_path)
+    copyability_bucket_outcome_path = write_json(f5_t09dfghi_outputs["copyability_score_bucket_outcome"], report_dir / F5_T09G_COPYABILITY_BUCKET_OUTCOME_FILENAME)
+    written.append(copyability_bucket_outcome_path)
+    atr_extension_outcomes_path = write_json(f5_t09dfghi_outputs["atr_extension_shadow_outcomes"], report_dir / F5_T09H_ATR_EXTENSION_OUTCOMES_FILENAME)
+    written.append(atr_extension_outcomes_path)
+    btc_bias_reclaim_quality_path = write_json(f5_t09dfghi_outputs["btc_bias_conflict_reclaim_quality"], report_dir / F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME)
+    written.append(btc_bias_reclaim_quality_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -261,6 +299,14 @@ def main() -> int:
         "\nAdditional AI review files added by F5_T09b/F5_T09c:\n"
         "- 20_no_progress_root_cause_v3.json, no-progress root-cause classifier v3\n"
         "- 21_mfe_capture_efficiency_by_exit_reason.json, MFE capture efficiency by exit reason\n"
+    )
+    ai_readme += (
+        "\nAdditional AI review files added by F5_T09d/F5_T09f/F5_T09g/F5_T09h/F5_T09i:\n"
+        "- 22_guard_shadow_outcome_matrix.json, guard blocked shadow outcome value matrix\n"
+        "- 23_low_vol_winners_vs_losers.json, LOW_VOL winners vs losers separation\n"
+        "- 24_copyability_score_bucket_outcome.json, copyability bucket outcomes\n"
+        "- 25_atr_extension_shadow_outcomes.json, ATR extension shadow outcomes\n"
+        "- 26_btc_bias_conflict_reclaim_quality.json, BTC bias conflict reclaim quality\n"
     )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
@@ -282,6 +328,11 @@ def main() -> int:
         report_dir / AI_INSIGHT_SUMMARY_FILENAME,
         report_dir / F5_T09B_NO_PROGRESS_ROOT_CAUSE_V3_FILENAME,
         report_dir / F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME,
+        report_dir / F5_T09D_GUARD_SHADOW_OUTCOME_MATRIX_FILENAME,
+        report_dir / F5_T09F_LOW_VOL_WINNERS_LOSERS_FILENAME,
+        report_dir / F5_T09G_COPYABILITY_BUCKET_OUTCOME_FILENAME,
+        report_dir / F5_T09H_ATR_EXTENSION_OUTCOMES_FILENAME,
+        report_dir / F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME,
         report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
         manifest_path,
     ]
