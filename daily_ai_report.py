@@ -40,6 +40,8 @@ from src.t02_diagnostics import compute_t02_diagnostics, write_t02_diagnostics
 from src.time_windows import parse_window
 from src.winners_losers import compare_winners_losers, write_winners_losers_csv
 
+AI_REVIEW_ZIP_ENTRY_SAFE_LIMIT = 95000
+
 
 def report_date_from_window_end(end_text: str) -> str:
     try:
@@ -56,6 +58,7 @@ def main() -> int:
     parser.add_argument("--max-ai-chars", type=int, default=DEFAULT_SAFE_TARGET_CHARS, help="Max characters per AI review pack txt part")
     parser.add_argument("--dry-run", action="store_true", help="Validate and print summary without writing report files")
     args = parser.parse_args()
+    args.max_ai_chars = min(args.max_ai_chars, AI_REVIEW_ZIP_ENTRY_SAFE_LIMIT)
 
     schema = SchemaMap.load("config/schema_map.json")
     window = parse_window(args.window)
@@ -258,7 +261,7 @@ def main() -> int:
         report_dir=report_dir,
         manifest_path=manifest_path,
         readme_path=ai_readme_path,
-        max_chars=DEFAULT_ZIP_CHAR_LIMIT,
+        max_chars=min(DEFAULT_ZIP_CHAR_LIMIT, AI_REVIEW_ZIP_ENTRY_SAFE_LIMIT),
     )
 
     zip_path = report_dir / f"AI_REVIEW_{report_date}.zip"
