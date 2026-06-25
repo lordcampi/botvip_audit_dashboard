@@ -12,6 +12,11 @@ from src.f5_t03b_sections import FILENAME as F5_T03B_SECTIONS_FILENAME
 from src.f5_t03b_sections import build_f5_t03b_integration_sections
 from src.f5_t04i_slim_sections import F5_T03B_SLIM_FILENAME, build_f5_t03b_slim_sections
 from src.f5_t09a_lifecycle_reconciliation import F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME, build_telegram_lifecycle_reconciliation_v2
+from src.f5_t09bc_no_progress_mfe import (
+    F5_T09B_NO_PROGRESS_ROOT_CAUSE_V3_FILENAME,
+    F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME,
+    build_f5_t09bc_no_progress_mfe_outputs,
+)
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -114,6 +119,13 @@ def main() -> int:
         signals=signals,
     )
 
+    f5_t09bc_outputs = build_f5_t09bc_no_progress_mfe_outputs(
+        facts=facts,
+        events=events,
+        signals=signals,
+        candidates=candidates,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -184,6 +196,13 @@ def main() -> int:
         },
     }
 
+    summary["f5_t09bc_no_progress_mfe_capture"] = {
+        "schema_version": f5_t09bc_outputs["no_progress_root_cause_v3"].get("schema_version"),
+        "files": [F5_T09B_NO_PROGRESS_ROOT_CAUSE_V3_FILENAME, F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME],
+        "read_only": True,
+        "purpose": "Diagnose no-progress root causes and MFE capture efficiency by exit reason.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -226,6 +245,10 @@ def main() -> int:
     written.append(ai_insight_summary_path)
     lifecycle_reconciliation_v2_path = write_json(f5_t09a_lifecycle_reconciliation, report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME)
     written.append(lifecycle_reconciliation_v2_path)
+    no_progress_v3_path = write_json(f5_t09bc_outputs["no_progress_root_cause_v3"], report_dir / F5_T09B_NO_PROGRESS_ROOT_CAUSE_V3_FILENAME)
+    written.append(no_progress_v3_path)
+    mfe_capture_efficiency_path = write_json(f5_t09bc_outputs["mfe_capture_efficiency_by_exit_reason"], report_dir / F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME)
+    written.append(mfe_capture_efficiency_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -233,6 +256,11 @@ def main() -> int:
     ai_readme += (
         "\nAdditional AI review file added by F5_T09a:\n"
         "- 19_telegram_lifecycle_reconciliation_v2.json, official WIN protected vs runner closure reconciliation\n"
+    )
+    ai_readme += (
+        "\nAdditional AI review files added by F5_T09b/F5_T09c:\n"
+        "- 20_no_progress_root_cause_v3.json, no-progress root-cause classifier v3\n"
+        "- 21_mfe_capture_efficiency_by_exit_reason.json, MFE capture efficiency by exit reason\n"
     )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
@@ -252,6 +280,8 @@ def main() -> int:
         report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME,
         report_dir / LOSS_CONTRIBUTION_FILENAME,
         report_dir / AI_INSIGHT_SUMMARY_FILENAME,
+        report_dir / F5_T09B_NO_PROGRESS_ROOT_CAUSE_V3_FILENAME,
+        report_dir / F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME,
         report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
         manifest_path,
     ]
