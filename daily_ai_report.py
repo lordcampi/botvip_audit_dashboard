@@ -26,6 +26,7 @@ from src.f5_t09dfghi_guard_segments import (
     build_f5_t09dfghi_guard_filter_outputs,
 )
 from src.f5_t09e_symbol_alpha import F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME, build_symbol_not_allowed_shadow_alpha
+from src.f5_t10_super_digest import F5_T10_DIGEST_JSON_FILENAME, F5_T10_DIGEST_MD_FILENAME, build_f5_t09_super_digest
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -149,6 +150,18 @@ def main() -> int:
         candidates=candidates,
     )
 
+    f5_t09_super_digest = build_f5_t09_super_digest(
+        lifecycle_reconciliation=f5_t09a_lifecycle_reconciliation,
+        no_progress_v3=f5_t09bc_outputs["no_progress_root_cause_v3"],
+        mfe_capture=f5_t09bc_outputs["mfe_capture_efficiency_by_exit_reason"],
+        guard_matrix=f5_t09dfghi_outputs["guard_shadow_outcome_matrix"],
+        low_vol=f5_t09dfghi_outputs["low_vol_winners_vs_losers"],
+        copyability=f5_t09dfghi_outputs["copyability_score_bucket_outcome"],
+        atr_extension=f5_t09dfghi_outputs["atr_extension_shadow_outcomes"],
+        btc_bias=f5_t09dfghi_outputs["btc_bias_conflict_reclaim_quality"],
+        symbol_alpha=f5_t09e_symbol_alpha,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -246,6 +259,13 @@ def main() -> int:
         "purpose": "Measure alpha in symbol-not-allowed shadow candidates without opening allowlist.",
     }
 
+    summary["f5_t10_f5_t09_ai_super_digest"] = {
+        "schema_version": f5_t09_super_digest["json"].get("schema_version"),
+        "files": [F5_T10_DIGEST_JSON_FILENAME, F5_T10_DIGEST_MD_FILENAME],
+        "read_only": True,
+        "purpose": "Compact AI-ready F5_T09 digest; full F5_T09 JSONs remain server-side only.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -304,6 +324,10 @@ def main() -> int:
     written.append(btc_bias_reclaim_quality_path)
     symbol_alpha_path = write_json(f5_t09e_symbol_alpha, report_dir / F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME)
     written.append(symbol_alpha_path)
+    f5_t09_digest_json_path = write_json(f5_t09_super_digest["json"], report_dir / F5_T10_DIGEST_JSON_FILENAME)
+    written.append(f5_t09_digest_json_path)
+    f5_t09_digest_md_path = write_text(f5_t09_super_digest["markdown"], report_dir / F5_T10_DIGEST_MD_FILENAME)
+    written.append(f5_t09_digest_md_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -329,6 +353,12 @@ def main() -> int:
         "\nAdditional AI review file added by F5_T09e:\n"
         "- 27_symbol_not_allowed_shadow_alpha.json, symbol-not-allowed shadow alpha ranking without allowlist changes\n"
     )
+    ai_readme += (
+        "\nF5_T10 AI ZIP slimming policy:\n"
+        "- 28_f5_t09_ai_super_digest.json and .md summarize F5_T09 sections 19-27 for AI review.\n"
+        "- Full F5_T09 JSON files 20-27 are generated in the server report folder but excluded from this AI ZIP to avoid excessive chunking.\n"
+        "- Ask for a full server-side JSON only when a specific section needs deep evidence review.\n"
+    )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
     written.append(manifest_path)
@@ -347,14 +377,8 @@ def main() -> int:
         report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME,
         report_dir / LOSS_CONTRIBUTION_FILENAME,
         report_dir / AI_INSIGHT_SUMMARY_FILENAME,
-        report_dir / F5_T09B_NO_PROGRESS_ROOT_CAUSE_V3_FILENAME,
-        report_dir / F5_T09C_MFE_CAPTURE_EFFICIENCY_FILENAME,
-        report_dir / F5_T09D_GUARD_SHADOW_OUTCOME_MATRIX_FILENAME,
-        report_dir / F5_T09F_LOW_VOL_WINNERS_LOSERS_FILENAME,
-        report_dir / F5_T09G_COPYABILITY_BUCKET_OUTCOME_FILENAME,
-        report_dir / F5_T09H_ATR_EXTENSION_OUTCOMES_FILENAME,
-        report_dir / F5_T09I_BTC_BIAS_RECLAIM_QUALITY_FILENAME,
-        report_dir / F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME,
+        report_dir / F5_T10_DIGEST_JSON_FILENAME,
+        report_dir / F5_T10_DIGEST_MD_FILENAME,
         report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
         manifest_path,
     ]
