@@ -252,6 +252,7 @@ def main() -> int:
         report_dir / ENTITY_SCOPE_RECONCILIATION_FILENAME,
         report_dir / LOSS_CONTRIBUTION_FILENAME,
         report_dir / AI_INSIGHT_SUMMARY_FILENAME,
+        report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
