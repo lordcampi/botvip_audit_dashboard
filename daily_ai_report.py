@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
@@ -27,6 +27,11 @@ from src.f5_t09dfghi_guard_segments import (
 )
 from src.f5_t09e_symbol_alpha import F5_T09E_SYMBOL_SHADOW_ALPHA_FILENAME, build_symbol_not_allowed_shadow_alpha
 from src.f5_t10_super_digest import F5_T10_DIGEST_JSON_FILENAME, F5_T10_DIGEST_MD_FILENAME, build_f5_t09_super_digest
+from src.ai_reporter.f5_t12_strategy_readiness import (
+    F5_T12_READINESS_JSON_FILENAME,
+    F5_T12_READINESS_MD_FILENAME,
+    build_f5_t12_strategy_readiness,
+)
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -162,6 +167,17 @@ def main() -> int:
         symbol_alpha=f5_t09e_symbol_alpha,
     )
 
+    # F5_T12 Strategy Change Readiness digest (compact, < 95,000 chars)
+    f5_t12_readiness = build_f5_t12_strategy_readiness(
+        lifecycle=lifecycle,
+        facts=facts,
+        t02_diagnostics=t02_diagnostics,
+        loss_contribution=f5_t04e_outputs["loss_contribution"],
+        no_progress_v3=f5_t09bc_outputs["no_progress_root_cause_v3"],
+        guard_matrix=f5_t09dfghi_outputs["guard_shadow_outcome_matrix"],
+        lifecycle_reconciliation=f5_t09a_lifecycle_reconciliation,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -266,6 +282,13 @@ def main() -> int:
         "purpose": "Compact AI-ready F5_T09 digest; full F5_T09 JSONs remain server-side only.",
     }
 
+    summary["f5_t12_strategy_change_readiness"] = {
+        "schema_version": f5_t12_readiness["json"].get("schema_version"),
+        "files": [F5_T12_READINESS_JSON_FILENAME, F5_T12_READINESS_MD_FILENAME],
+        "read_only": True,
+        "purpose": "Compact F5_T12 strategy change readiness digest with top findings and deploy checklist.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -328,6 +351,10 @@ def main() -> int:
     written.append(f5_t09_digest_json_path)
     f5_t09_digest_md_path = write_text(f5_t09_super_digest["markdown"], report_dir / F5_T10_DIGEST_MD_FILENAME)
     written.append(f5_t09_digest_md_path)
+    f5_t12_readiness_json_path = write_json(f5_t12_readiness["json"], report_dir / F5_T12_READINESS_JSON_FILENAME)
+    written.append(f5_t12_readiness_json_path)
+    f5_t12_readiness_md_path = write_text(f5_t12_readiness["markdown"], report_dir / F5_T12_READINESS_MD_FILENAME)
+    written.append(f5_t12_readiness_md_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -359,6 +386,12 @@ def main() -> int:
         "- Full F5_T09 JSON files 20-27 are generated in the server report folder but excluded from this AI ZIP to avoid excessive chunking.\n"
         "- Ask for a full server-side JSON only when a specific section needs deep evidence review.\n"
     )
+    ai_readme += (
+        "\nF5_T12 Strategy Change Readiness digest:\n"
+        "- 29_f5_t12_strategy_change_readiness.json and .md compact digest for F5_T12 change validation.\n"
+        "- Summarizes denominators, PF core, loss top, no-progress, risk context, guard value, data quality, and human checklist.\n"
+        "- Both files are < 95,000 characters; full evidence remains server-side.\n"
+    )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
     written.append(manifest_path)
@@ -380,6 +413,8 @@ def main() -> int:
         report_dir / F5_T10_DIGEST_JSON_FILENAME,
         report_dir / F5_T10_DIGEST_MD_FILENAME,
         report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
+        report_dir / F5_T12_READINESS_JSON_FILENAME,
+        report_dir / F5_T12_READINESS_MD_FILENAME,
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
