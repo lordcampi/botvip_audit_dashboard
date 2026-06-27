@@ -99,12 +99,23 @@ def _limit(value: Any, *, max_items: int = 8, depth: int = 2) -> Any:
 def _build_denominators(
     lifecycle: dict[str, Any],
     facts: list[dict[str, Any]] | None = None,
+    report_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Extract official denominators from lifecycle metrics."""
     signals_total = lifecycle.get("signals_total", 0)
     sent_to_telegram = lifecycle.get("sent_to_telegram", 0)
     candidates_total = lifecycle.get("candidates_total", 0)
-    events_total = lifecycle.get("events_total", 0)
+
+    # Priority: report_manifest.rows.events -> lifecycle.events_total -> lifecycle.events -> 0
+    events_total = 0
+    if report_manifest:
+        manifest_rows = _as_dict(report_manifest.get("rows", {}))
+        events_total = manifest_rows.get("events", 0)
+    if events_total == 0:
+        events_total = lifecycle.get("events_total", 0)
+    if events_total == 0:
+        events_total = lifecycle.get("events", 0)
+
     facts_total = len(facts) if facts else lifecycle.get("facts_total", 0)
 
     return {
@@ -127,6 +138,9 @@ def _build_pf_core(t02_diagnostics: dict[str, Any]) -> dict[str, Any]:
 
     sent_only = _as_dict(pf_data.get("sent_only", {}))
     all_pf = _as_dict(pf_data.get("all_signals", {}))
+    # Fallback: real T02 structure uses profit_factor_diagnostics.global
+    if not all_pf:
+        all_pf = _as_dict(pf_data.get("global", {}))
 
     return {
         "sent_only": {
@@ -334,94 +348,6 @@ def _build_source_of_truth_note() -> dict[str, Any]:
         "note": "This digest is observational-only. All sources are pre-computed JSON sections.",
     }
 
-def _build_digest_consistency_checks(
-    denominators: dict[str, Any],
-    pf_core: dict[str, Any],
-    no_progress_core: dict[str, Any],
-) -> dict[str, Any]:
-    """Run consistency checks C01-C10."""
-    checks: list[dict[str, Any]] = []
-
-    os_val = denominators.get("official_signals", 0)
-    checks.append({
-        "id": "C01", "name": "official_signals > 0",
-        "passed": bool(os_val and os_val > 0),
-        "value": os_val, "detail": "" if os_val and os_val > 0 else "WARNING: official_signals is 0 or missing",
-    })
-
-    stt_val = denominators.get("sent_to_telegram", 0)
-    checks.append({
-        "id": "C02", "name": "sent_to_telegram > 0",
-        "passed": bool(stt_val and stt_val > 0),
-        "value": stt_val, "detail": "" if stt_val and stt_val > 0 else "WARNING: sent_to_telegram is 0 or missing",
-    })
-
-    sent_count = _safe_get(pf_core, ["sent_only", "count"], 0)
-    checks.append({
-        "id": "C03", "name": "pf_core.sent_only.count == sent_to_telegram",
-        "passed": sent_count == stt_val,
-        "value": {"sent_only_count": sent_count, "sent_to_telegram": stt_val},
-        "detail": "" if sent_count == stt_val else f"WARNING: sent_only.count ({sent_count}) != sent_to_telegram ({stt_val})",
-    })
-
-    gross_loss = _safe_get(pf_core, ["sent_only", "gross_loss_r"], 0)
-    pf_val = _safe_get(pf_core, ["sent_only", "profit_factor"])
-    checks.append({
-        "id": "C04", "name": "profit_factor is not null when gross_loss != 0",
-        "passed": gross_loss == 0 or pf_val is not None,
-        "value": {"gross_loss_r": gross_loss, "profit_factor": pf_val},
-        "detail": "" if gross_loss == 0 or pf_val is not None else "WARNING: profit_factor is null but gross_loss_r is non-zero",
-    })
-
-    np_count = no_progress_core.get("official_no_progress_count") or 0
-    top_syms = no_progress_core.get("top_symbols", [])
-    sum_top = sum(s.get("count", 0) for s in top_syms)
-    checks.append({
-        "id": "C05", "name": "official_no_progress_count == sum(top_symbols counts)",
-        "passed": np_count == sum_top if top_syms else True,
-        "value": {"official_no_progress_count": np_count, "sum_top_symbols_counts": sum_top, "top_symbols_count": len(top_syms)},
-        "detail": "" if np_count == sum_top else f"WARNING: np_count ({np_count}) != sum_top ({sum_top})",
-    })
-
-    events_val = denominators.get("events", 0)
-    checks.append({
-        "id": "C06", "name": "events > 0",
-        "passed": bool(events_val and events_val > 0),
-        "value": events_val, "detail": "" if events_val and events_val > 0 else "WARNING: events is 0 or missing",
-    })
-
-    checks.append({
-        "id": "C07", "name": "no generated JSON > 95000 chars",
-        "passed": True, "value": MAX_DIGEST_CHARS,
-        "detail": "Enforced at build time via MAX_DIGEST_CHARS guard",
-    })
-    checks.append({
-        "id": "C08", "name": "JSON parseable",
-        "passed": True, "value": None,
-        "detail": "Enforced at build time via json.dumps round-trip",
-    })
-    checks.append({
-        "id": "C09", "name": "read_only == true",
-        "passed": True, "value": True,
-        "detail": "read_only is hardcoded to True in the digest schema",
-    })
-    checks.append({
-        "id": "C10", "name": "source notes populated",
-        "passed": True, "value": None,
-        "detail": "source_of_truth_note section is populated if present in output",
-    })
-
-    return {
-        "consistency_checks": checks,
-        "summary": {
-            "total": len(checks),
-            "passed": sum(1 for c in checks if c["passed"]),
-            "failed": sum(1 for c in checks if not c["passed"]),
-        },
-        "note": "Consistency checks validate internal consistency. Warnings are informational.",
-    }
-
-
 
 
 def _build_digest_consistency_checks(
@@ -555,13 +481,14 @@ def build_f5_t12_strategy_readiness(
     no_progress_v3: dict[str, Any],
     guard_matrix: dict[str, Any],
     lifecycle_reconciliation: dict[str, Any] | None = None,
+    report_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the F5_T12 Strategy Change Readiness digest.
 
     CORRECTED: PF core reads T02 sent_only/all_signals directly,
     no-progress reads correct count keys, data quality scopes separated.
     """
-    _denominators = _build_denominators(lifecycle, facts)
+    _denominators = _build_denominators(lifecycle, facts, report_manifest)
     _pf_core = _build_pf_core(t02_diagnostics)
     _no_progress_core = _build_no_progress_core(no_progress_v3)
 

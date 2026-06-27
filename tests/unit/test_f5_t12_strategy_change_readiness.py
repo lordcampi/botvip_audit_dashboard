@@ -39,6 +39,17 @@ class TestPfCore:
         assert r["sent_only"]["count"] == 38
         assert r["sent_only"]["profit_factor"] == 0.242191
         assert r["all_signals"]["count"] == 67
+    def test_all_signals_falls_back_to_t02_global(self):
+        """Fix 2: when profit_factor_diagnostics.all_signals is empty, use .global."""
+        t02_global = {"profit_factor_diagnostics": {
+            "sent_only": {"count": 38, "profit_factor": 0.242},
+            "global": {"count": 67, "r_values_count": 38, "gross_profit_r": 5.374, "gross_loss_r": -22.192, "avg_r": -0.442, "profit_factor": 0.242, "status": "losing_segment"}
+        }}
+        r = _build_pf_core(t02_global)
+        assert r["all_signals"]["count"] == 67
+        assert r["all_signals"]["r_values_count"] == 38
+        assert r["all_signals"]["profit_factor"] == 0.242
+        assert r["all_signals"]["status"] == "losing_segment"
     def test_empty(self):
         r = _build_pf_core({})
         assert r["sent_only"]["count"] == 0
@@ -55,6 +66,13 @@ class TestNoProgress:
 class TestDenominators:
     def test_events_not_zero(self):
         r = _build_denominators(_life())
+        assert r["events"] == 334
+    def test_events_uses_report_manifest_rows_events(self):
+        """Fix 1: report_manifest.rows.events has priority over lifecycle.events_total."""
+        r = _build_denominators(_life(), report_manifest={"rows": {"events": 500}})
+        assert r["events"] == 500
+    def test_events_fallback_to_lifecycle_when_manifest_zero(self):
+        r = _build_denominators(_life(), report_manifest={"rows": {"events": 0}})
         assert r["events"] == 334
     def test_sent_to_telegram(self):
         r = _build_denominators(_life())
