@@ -168,6 +168,8 @@ def main() -> int:
     )
 
     # F5_T12 Strategy Change Readiness digest (compact, < 95,000 chars)
+    # Build minimal manifest for F5_T12 denominator (full manifest is built later in summary)
+    _t12_manifest = {"rows": {"events": len(events), "facts": len(facts), "candidates": len(candidates)}}
     f5_t12_readiness = build_f5_t12_strategy_readiness(
         lifecycle=lifecycle,
         facts=facts,
@@ -176,6 +178,7 @@ def main() -> int:
         no_progress_v3=f5_t09bc_outputs["no_progress_root_cause_v3"],
         guard_matrix=f5_t09dfghi_outputs["guard_shadow_outcome_matrix"],
         lifecycle_reconciliation=f5_t09a_lifecycle_reconciliation,
+        report_manifest=_t12_manifest,
     )
 
     report_date = report_date_from_window_end(window.end_text)

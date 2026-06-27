@@ -117,6 +117,15 @@ def _build_denominators(
         events_total = lifecycle.get("events", 0)
 
     facts_total = len(facts) if facts else lifecycle.get("facts_total", 0)
+    # Also use report_manifest.rows.{facts,candidates} as fallback
+    if facts_total == 0 and report_manifest:
+        facts_total = _as_dict(report_manifest.get("rows", {})).get("facts", 0)
+    if facts_total == 0:
+        facts_total = lifecycle.get("facts_total", 0)
+
+    candidates_total = lifecycle.get("candidates_total", 0)
+    if candidates_total == 0 and report_manifest:
+        candidates_total = _as_dict(report_manifest.get("rows", {})).get("candidates", 0)
 
     return {
         "official_signals": signals_total,
