@@ -32,6 +32,11 @@ from src.ai_reporter.f5_t12_strategy_readiness import (
     F5_T12_READINESS_MD_FILENAME,
     build_f5_t12_strategy_readiness,
 )
+from src.f5_t13_post_change_digest import (
+    F5_T13_DIGEST_JSON_FILENAME,
+    F5_T13_DIGEST_MD_FILENAME,
+    build_f5_t13_post_change_digest,
+)
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -181,6 +186,18 @@ def main() -> int:
         report_manifest=_t12_manifest,
     )
 
+    # F5_T13 Post-change Strategy Impact Digest (compact, < 95,000 chars)
+    # Measures impact of F5_T12_v3 OFA Risk Context Gate deployed 2026-07-01 10:00 COL
+    f5_t13_post_change = build_f5_t13_post_change_digest(
+        facts=facts,
+        lifecycle=lifecycle,
+        guard_matrix=f5_t09dfghi_outputs["guard_shadow_outcome_matrix"],
+        no_progress_v3=f5_t09bc_outputs["no_progress_root_cause_v3"],
+        mfe_capture=f5_t09bc_outputs["mfe_capture_efficiency_by_exit_reason"],
+        window_start_text=window.start_text,
+        window_end_text=window.end_text,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -292,6 +309,13 @@ def main() -> int:
         "purpose": "Compact F5_T12 strategy change readiness digest with top findings and deploy checklist.",
     }
 
+    summary["f5_t13_post_change_strategy_impact_digest"] = {
+        "schema_version": f5_t13_post_change["json"].get("schema_version"),
+        "files": [F5_T13_DIGEST_JSON_FILENAME, F5_T13_DIGEST_MD_FILENAME],
+        "read_only": True,
+        "purpose": "Compact F5_T13 post-change impact digest measuring F5_T12_v3 gate effect since 2026-07-01 10:00 COL.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -358,6 +382,10 @@ def main() -> int:
     written.append(f5_t12_readiness_json_path)
     f5_t12_readiness_md_path = write_text(f5_t12_readiness["markdown"], report_dir / F5_T12_READINESS_MD_FILENAME)
     written.append(f5_t12_readiness_md_path)
+    f5_t13_json_path = write_json(f5_t13_post_change["json"], report_dir / F5_T13_DIGEST_JSON_FILENAME)
+    written.append(f5_t13_json_path)
+    f5_t13_md_path = write_text(f5_t13_post_change["markdown"], report_dir / F5_T13_DIGEST_MD_FILENAME)
+    written.append(f5_t13_md_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -395,6 +423,13 @@ def main() -> int:
         "- Summarizes denominators, PF core, loss top, no-progress, risk context, guard value, data quality, and human checklist.\n"
         "- Both files are < 95,000 characters; full evidence remains server-side.\n"
     )
+    ai_readme += (
+        "\nF5_T13 Post-change Strategy Impact Digest:\n"
+        "- 30_f5_t13_post_change_strategy_impact_digest.json and .md compact digest measuring F5_T12_v3 gate impact since 2026-07-01 10:00 COL.\n"
+        "- Includes core post-change metrics (PF, Net R, Winrate), pre/post comparison, symbol/direction/regime/killzone breakdowns,\n"
+        "  exit reasons, MFE/MAE, no-progress, guard value, risk_context_gate blocked count, and conservative interpretation.\n"
+        "- Uses sent_to_telegram as primary denominator. Candidate snapshots are NOT trades. Both files < 95,000 characters.\n"
+    )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
     written.append(manifest_path)
@@ -418,6 +453,8 @@ def main() -> int:
         report_dir / F5_T09A_LIFECYCLE_RECONCILIATION_FILENAME,
         report_dir / F5_T12_READINESS_JSON_FILENAME,
         report_dir / F5_T12_READINESS_MD_FILENAME,
+        report_dir / F5_T13_DIGEST_JSON_FILENAME,
+        report_dir / F5_T13_DIGEST_MD_FILENAME,
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
