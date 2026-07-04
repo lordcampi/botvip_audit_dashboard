@@ -37,6 +37,11 @@ from src.f5_t13_post_change_digest import (
     F5_T13_DIGEST_MD_FILENAME,
     build_f5_t13_post_change_digest,
 )
+from src.f5_t14_tp_policy_simulation import (
+    F5_T14_DIGEST_JSON_FILENAME,
+    F5_T14_DIGEST_MD_FILENAME,
+    build_f5_t14_tp_policy_simulation,
+)
 from src.f5_t04bcd_diagnostics import (
     ENTITY_SCOPE_RECONCILIATION_FILENAME,
     NO_PROGRESS_ROOT_CAUSE_FILENAME,
@@ -198,6 +203,15 @@ def main() -> int:
         window_end_text=window.end_text,
     )
 
+    # F5_T14 TP Policy Simulation (compact, < 95,000 chars)
+    # Simulates alternative TP policies (single TP, delayed BE) using MFE/MAE data
+    f5_t14_tp_policy = build_f5_t14_tp_policy_simulation(
+        facts=facts,
+        lifecycle=lifecycle,
+        window_start_text=window.start_text,
+        window_end_text=window.end_text,
+    )
+
     report_date = report_date_from_window_end(window.end_text)
     report_dir = Path(args.output) / report_date
 
@@ -316,6 +330,13 @@ def main() -> int:
         "purpose": "Compact F5_T13 post-change impact digest measuring F5_T12_v3 gate effect since 2026-07-01 10:00 COL.",
     }
 
+    summary["f5_t14_tp_policy_simulation"] = {
+        "schema_version": f5_t14_tp_policy["json"].get("schema_version"),
+        "files": [F5_T14_DIGEST_JSON_FILENAME, F5_T14_DIGEST_MD_FILENAME],
+        "read_only": True,
+        "purpose": "Compact F5_T14 TP policy simulation comparing current TP1+runner+BE vs single TP and delayed BE alternatives.",
+    }
+
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
         print("OK: dry-run completed. No files written.")
@@ -386,6 +407,10 @@ def main() -> int:
     written.append(f5_t13_json_path)
     f5_t13_md_path = write_text(f5_t13_post_change["markdown"], report_dir / F5_T13_DIGEST_MD_FILENAME)
     written.append(f5_t13_md_path)
+    f5_t14_json_path = write_json(f5_t14_tp_policy["json"], report_dir / F5_T14_DIGEST_JSON_FILENAME)
+    written.append(f5_t14_json_path)
+    f5_t14_md_path = write_text(f5_t14_tp_policy["markdown"], report_dir / F5_T14_DIGEST_MD_FILENAME)
+    written.append(f5_t14_md_path)
     written.append(write_text(ai_prompt, report_dir / "09_ai_prompt.md"))
     ai_parts = write_split_text(ai_pack, report_dir, "10_ai_review_pack", max_chars=args.max_ai_chars)
     written.extend(ai_parts)
@@ -430,6 +455,15 @@ def main() -> int:
         "  exit reasons, MFE/MAE, no-progress, guard value, risk_context_gate blocked count, and conservative interpretation.\n"
         "- Uses sent_to_telegram as primary denominator. Candidate snapshots are NOT trades. Both files < 95,000 characters.\n"
     )
+    ai_readme += (
+        "\nF5_T14 TP Policy Simulation:\n"
+        "- 31_f5_t14_tp_policy_simulation.json and .md compact digest simulating alternative TP policies.\n"
+        "- Compares current TP1-protected+runner+BE vs single-TP (1.10x-1.50x) and delayed-BE alternatives.\n"
+        "- Includes post-TP1 extension distribution, segment breakdowns by symbol/direction/regime/killzone,\n"
+        "  data quality assessment, and conservative interpretation.\n"
+        "- Uses sent_to_telegram as primary denominator. MFE/MAE-based where available. Both files < 95,000 characters.\n"
+        "- Read-only observational simulation. Does NOT recommend or implement TP/SL/BE changes.\n"
+    )
     ai_readme_path = write_text(ai_readme, report_dir / "00_README_FOR_AI.md")
     manifest_path = write_json(summary, report_dir / "report_manifest.json")
     written.append(manifest_path)
@@ -455,6 +489,8 @@ def main() -> int:
         report_dir / F5_T12_READINESS_MD_FILENAME,
         report_dir / F5_T13_DIGEST_JSON_FILENAME,
         report_dir / F5_T13_DIGEST_MD_FILENAME,
+        report_dir / F5_T14_DIGEST_JSON_FILENAME,
+        report_dir / F5_T14_DIGEST_MD_FILENAME,
         manifest_path,
     ]
     ai_zip_files.extend(ai_parts)
