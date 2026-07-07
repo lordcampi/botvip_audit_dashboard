@@ -432,13 +432,20 @@ def telegram_notified_consistency_check(facts: list[dict[str, Any]]) -> dict[str
     notified_non_null = [row for row in signals if row.get("telegram_notified") is not None]
     notified_true = sum(1 for row in signals if _is_true(row.get("telegram_notified")))
     mismatches = [row for row in signals if _is_true(row.get("sent_to_telegram")) and not _is_true(row.get("telegram_notified"))]
+    
+    # Determine telegram_notified reliability status
+    telegram_notified_status = "legacy_or_unreliable" if notified_true == 0 and sent_count > 0 else "ok"
+    
     return {
+        "source_of_truth": "sent_to_telegram",
         "sent_to_telegram_count": sent_count,
         "telegram_notified_true_count": notified_true,
         "telegram_notified_non_null_count": len(notified_non_null),
+        "telegram_notified_status": telegram_notified_status,
         "mismatch_sent_true_notified_false": len(mismatches),
         "recommended_sent_metric": "sent_to_telegram",
-        "likely_interpretation": "telegram_notified appears missing, deprecated, or mapped from a different source if it stays at 0 while sent_to_telegram is positive.",
+        "likely_interpretation": "telegram_notified is not reliable in this window. It is derived from OFA funnel metadata (ofa_funnel.telegram_notified), a separate source from the lifecycle event stream. sent_to_telegram is driven by NOTIFIED events and is the authoritative source of truth for delivery metrics.",
+        "note": "telegram_notified marked as legacy_or_unreliable because notified_true_count == 0 while sent_to_telegram > 0. Use sent_to_telegram for all delivery-rate, win-rate, PF, and other observability denominators.",
         "sample_mismatches": [{"signal_id": r.get("signal_id"), "symbol": r.get("symbol"), "status": r.get("status"), "sent_to_telegram": r.get("sent_to_telegram"), "telegram_notified": r.get("telegram_notified")} for r in mismatches[:40]],
     }
 

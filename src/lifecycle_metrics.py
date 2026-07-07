@@ -90,6 +90,9 @@ def compute_lifecycle_metrics(facts: list[dict[str, Any]]) -> dict[str, Any]:
         "top_blocked_reasons": dict(blocked_reason_counts.most_common(30)),
         "near_miss_candidates": sum(1 for row in candidates if _is_true(row.get("near_miss"))),
         "would_send_candidates": sum(1 for row in candidates if _is_true(row.get("would_send_signal"))),
+        "telegram_notified_note": "telegram_notified field is not reliable in this window; sent_to_telegram is the source of truth for delivery metrics.",
+        "telegram_notified_status": "legacy_or_unreliable",
+        "primary_denominator": "sent_to_telegram",
     }
 
 

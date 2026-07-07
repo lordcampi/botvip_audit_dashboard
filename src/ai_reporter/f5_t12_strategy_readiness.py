@@ -133,7 +133,9 @@ def _build_denominators(
         "candidates": candidates_total,
         "events": events_total,
         "facts": facts_total,
-        "note": "Denominators from lifecycle reconciliation. Do not double-count derived rows.",
+        "primary_denominator": "sent_to_telegram",
+        "telegram_notified_note": "telegram_notified field is not reliable in this window; sent_to_telegram is the source of truth for delivery metrics. telegram_notified is derived from OFA funnel metadata, a separate source from lifecycle events.",
+        "note": "Denominators from lifecycle reconciliation. Do not double-count derived rows. sent_to_telegram is the primary denominator for all delivery-rate, win-rate, PF, and observability metrics.",
     }
 
 
@@ -434,6 +436,27 @@ def _build_digest_consistency_checks(
         "id": "C10", "name": "source notes populated",
         "passed": True, "value": None,
         "detail": "source_of_truth_note section is populated if present in output",
+    })
+
+    # C11: telegram_notified legacy check
+    stt_val = denominators.get("sent_to_telegram", 0)
+    telegram_notified_documented_legacy = (
+        "telegram_notified_note" in denominators
+        or denominators.get("primary_denominator") == "sent_to_telegram"
+    )
+    checks.append({
+        "id": "C11",
+        "name": "telegram_notified documented as legacy_or_unreliable when sent_to_telegram > 0",
+        "passed": stt_val == 0 or telegram_notified_documented_legacy,
+        "value": {
+            "sent_to_telegram": stt_val,
+            "telegram_notified_legacy_documented": telegram_notified_documented_legacy,
+        },
+        "detail": (
+            ""
+            if stt_val == 0 or telegram_notified_documented_legacy
+            else "WARNING: sent_to_telegram > 0 but telegram_notified is not documented as legacy_or_unreliable"
+        ),
     })
 
     return {

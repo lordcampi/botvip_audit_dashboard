@@ -238,6 +238,12 @@ def main() -> int:
     summary = {
         "window": {"label": window.label, "start": window.start_text, "end": window.end_text},
         "rows": {"events": len(events), "signals": len(signals), "candidates": len(candidates), "facts": len(facts)},
+        "primary_denominator": "sent_to_telegram",
+        "consistency_notes": [
+            "telegram_notified is legacy/deprecated; sent_to_telegram is the source of truth for delivery metrics.",
+            "Candidate snapshots, events, and facts are NOT trades. Do not count them as trade denominators.",
+            "Use sent_to_telegram for all delivery-rate, win-rate, PF, and observability denominators.",
+        ],
         "lifecycle": lifecycle,
         "audit": audit,
         "blocked_summary": blocked_summary,
