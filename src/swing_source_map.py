@@ -11,7 +11,7 @@ Each metric declares:
   - table:         PostgreSQL table name (None for non-PG sources)
   - column:        Column within the table (None if not a single column)
   - json_path:     Dotted path into a JSON/JSONB column (e.g. "swing_v1.adapter_parity")
-  - authority:     "PRIMARY_OFFICIAL" | "SHADOW" | "SECONDARY_DIAGNOSTIC" | 
+  - authority:     "PRIMARY_OFFICIAL" | "SHADOW" | "SECONDARY_DIAGNOSTIC" |
                    "TEMPORARY_LOG_SOURCE" | "LEGACY_ONLY" | "DERIVED"
   - confidence:    "HIGH" | "MEDIUM" | "LOW" | "EXPERIMENTAL" | "PARTIAL" | "UNVERIFIED"
   - data_available: bool (whether the data exists in the current env)
