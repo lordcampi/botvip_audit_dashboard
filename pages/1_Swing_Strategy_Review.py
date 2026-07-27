@@ -377,6 +377,172 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
+# R3C — Swing Review Pack for Copilot
+# ---------------------------------------------------------------------------
+st.subheader("📦 Export Review Pack for Copilot")
+
+# Session-state keys for R3C
+_R3C_KEYS = [
+    "r3c_zip_bytes",
+    "r3c_prompt_text",
+    "r3c_review_id",
+    "r3c_generated_at",
+    "r3c_fingerprint",
+    "r3c_scope",
+]
+
+# --- Determine generation validity -------------------------------------------
+_quality = data.get("data_quality", {})
+_ql = _quality.get("level", "UNKNOWN")
+_has_signals = data.get("total_signals", 0) > 0
+_has_fp = bool(selected_fp)
+_no_error = not data.get("error")
+
+_can_generate = _has_signals and _has_fp and _no_error
+_blocked_invalid = _ql == "INVALID" and _can_generate
+_allowed_quality = _can_generate and not _blocked_invalid
+
+# --- Preview card ------------------------------------------------------------
+if _can_generate:
+    _scope = "latest_only" if sel_fp_mode == "Latest fingerprint only" else "all_mixed"
+    _window_co = f"{start_dt.strftime('%Y-%m-%d %H:%M')} → {end_dt.strftime('%Y-%m-%d %H:%M')} CO"
+    _fp_preview = selected_fp[:16] if selected_fp and selected_fp != "ALL" else "MIXED"
+    _warnings = quality.get("reasons", [])
+    _readiness = "INVALID" if _blocked_invalid else (
+        "INSUFFICIENT" if _ql in ("INSUFFICIENT",) else "OK"
+    )
+
+    st.caption("**Preview** — data that will be packaged for Copilot")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Window (CO)", _window_co[:40] + "…" if len(_window_co) > 40 else _window_co)
+    with c2:
+        st.metric("Fingerprint", _fp_preview)
+    with c3:
+        st.metric("Signals", data.get("total_signals", 0))
+    with c4:
+        st.metric("Quality", _ql)
+    if _warnings:
+        st.caption("Quality reasons: " + " · ".join(_warnings))
+
+# --- INVALID blocker ---------------------------------------------------------
+if _blocked_invalid:
+    st.error(
+        "🚫 Data quality is INVALID. The Review Pack has been blocked to avoid "
+        "sending unreliable data to Copilot. Review the quality reasons above "
+        "and adjust the window or fingerprint before retrying."
+    )
+elif _allowed_quality:
+    # --- PARTIAL / INSUFFICIENT warning -------------------------------------
+    if _ql in ("PARTIAL", "INSUFFICIENT"):
+        st.warning(
+            f"⚠️ Data quality is **{_ql}**. The Review Pack can be generated, "
+            "but conclusions should be treated with conservative confidence. "
+            "Copilot will see a DATA_QUALITY_PARTIAL readiness decision."
+        )
+
+    # --- Initialise session state keys ---------------------------------------
+    for _k in _R3C_KEYS:
+        if _k not in st.session_state:
+            st.session_state[_k] = None
+
+    # --- Detect if fingerprint/scope changed → invalidate cached review ------
+    _current_fp_scope = f"{selected_fp}|{_scope}"
+    if st.session_state.get("r3c_fingerprint") and st.session_state["r3c_fingerprint"] != _current_fp_scope:
+        for _k in _R3C_KEYS:
+            st.session_state[_k] = None
+
+    # --- Generate button ----------------------------------------------------
+    if st.session_state.get("r3c_zip_bytes") is None:
+        if st.button("⚡ Generate review for Copilot", type="primary", use_container_width=True):
+            with st.spinner("Building deterministic R3B ZIP (in memory)…"):
+                try:
+                    from src.swing_prompt_builder import build_swing_review_pack_for_download, build_copilot_prompt
+                    from src.swing_review_pack_builder import build_review_contents
+
+                    _gen_at = datetime.utcnow()
+                    _start_utc = data.get("window_start_utc")
+                    _end_utc = data.get("window_end_utc")
+                    _start_co = data.get("window_start_co")
+                    _end_co = data.get("window_end_co")
+
+                    _zip_bytes = build_swing_review_pack_for_download(
+                        data, selected_fp, _scope,
+                        _start_utc, _end_utc, _start_co, _end_co, _gen_at,
+                    )
+
+                    # Extract prompt text from the ZIP for separate download
+                    _draft = build_review_contents(
+                        data, selected_fp, _scope,
+                        _start_utc, _end_utc, _start_co, _end_co, _gen_at,
+                    )
+                    _prompt_text = build_copilot_prompt(_draft)
+
+                    _review_id = f"SWING-{_gen_at.strftime('%Y%m%d-%H%M')}"
+
+                    st.session_state["r3c_zip_bytes"] = _zip_bytes
+                    st.session_state["r3c_prompt_text"] = _prompt_text
+                    st.session_state["r3c_review_id"] = _review_id
+                    st.session_state["r3c_generated_at"] = _gen_at.isoformat()
+                    st.session_state["r3c_fingerprint"] = _current_fp_scope
+                    st.session_state["r3c_scope"] = _scope
+
+                except Exception as _exc:
+                    st.error(f"❌ Generation failed: {_exc}")
+
+    # --- Show generated review controls ------------------------------------
+    if st.session_state.get("r3c_zip_bytes") is not None:
+        _review_id = st.session_state.get("r3c_review_id", "Unknown")
+        _gen_ts = st.session_state.get("r3c_generated_at", "")
+        _zip_bytes = st.session_state["r3c_zip_bytes"]
+        _prompt_text = st.session_state["r3c_prompt_text"]
+
+        st.success(f"✅ Review pack ready — **{_review_id}**")
+
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                label="📥 Download Review Pack ZIP",
+                data=_zip_bytes,
+                file_name=f"SWING_REVIEW_PACK_R3B_{_review_id}.zip",
+                mime="application/zip",
+                use_container_width=True,
+            )
+        with col_dl2:
+            if _prompt_text:
+                st.download_button(
+                    label="📄 Download Copilot Prompt (.md)",
+                    data=_prompt_text,
+                    file_name=f"10_prompt_for_copilot_{_review_id}.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+
+        st.caption(
+            f"**Review ID:** {_review_id}  ·  "
+            f"**Generated:** {_gen_ts} UTC  ·  "
+            f"**Fingerprint:** `{_fp_preview}`  ·  "
+            f"**Scope:** {st.session_state.get('r3c_scope', 'N/A')}  ·  "
+            "11 files (R3B manifest + 01-09 analytical + Copilot prompt)"
+        )
+
+        # --- Clear generated review button ---------------------------------
+        if st.button("🗑️ Clear generated review", use_container_width=False):
+            for _k in _R3C_KEYS:
+                st.session_state[_k] = None
+
+else:
+    # --- Why ZIP is not available -------------------------------------------
+    if not _has_signals and not data.get("error"):
+        st.info("📭 No hay señales SWING en esta ventana. El Review Pack solo se habilita cuando existen señales.")
+    elif not _has_fp:
+        st.info("📭 No se detectó un fingerprint de configuración. Selecciona Latest fingerprint o All fingerprints.")
+    elif data.get("error"):
+        st.info("📭 Datos no disponibles. Corrige el error de conexión para habilitar la descarga.")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
 st.caption(
