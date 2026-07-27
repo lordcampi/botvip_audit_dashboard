@@ -25,8 +25,13 @@ ENV/
 id_rsa*
 id_ed25519*
 
-# Local DB / generated data
-/data/
+# Local DB / generated data (R4A history .gitkeep is excluded below)
+/data/*
+!/data/swing_reviews/
+/data/swing_reviews/*
+!/data/swing_reviews/.gitkeep
+/data/swing_review_index.json
+/data/*.corrupted_*
 *.db
 *.sqlite
 *.sqlite3
