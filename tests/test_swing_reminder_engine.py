@@ -744,6 +744,131 @@ class TestNoForbiddenImports:
 # ---------------------------------------------------------------------------
 # Regression: legacy files untouched
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Evidence cutoff (hotfix: window_end_utc, not generated_at_utc)
+# ---------------------------------------------------------------------------
+class TestEvidenceCutoff:
+    def test_cutoff_is_window_end_not_generated_at(self, mock_conn, history_mgr, reminder_state):
+        """Signal between window_end and generated_at must count as new."""
+        # Review: window_end = 3 days ago, generated_at = 2.5 days ago
+        gen_at = datetime.now(timezone.utc) - timedelta(days=2.5)
+        window_end = gen_at - timedelta(hours=12)  # 12h before generated_at
+        entry = _make_review_entry(generated_at_days_ago=2.5, signal_count=10)
+        entry["window_end_utc"] = window_end.isoformat()
+        entry["generated_at_utc"] = gen_at.isoformat()
+        entry["window_start_utc"] = (window_end - timedelta(days=7)).isoformat()
+        entry["content_hash"] = "unique_hash_cutoff_1"
+
+        history_mgr.persist_review(
+            review_id="SWING-20260724-120000-bb1c2d3e",
+            zip_bytes=b"z",
+            prompt_bytes=b"p",
+            metadata=entry,
+        )
+
+        with patch.dict(os.environ, {"SWING_TELEGRAM_MODE": "shadow"}):
+            with patch(
+                "src.swing_reminder_engine._count_new_signals_pg",
+                return_value=(TECH_MIN_NEW_SIGNALS, 0),
+            ) as mock_count:
+                result = evaluate_reminder(mock_conn, history_mgr, reminder_state)
+                # The cutoff passed to _count_new_signals_pg should be window_end
+                called_cutoff = mock_count.call_args[0][1]
+                assert called_cutoff == window_end, (
+                    f"Cutoff should be window_end_utc ({window_end}), "
+                    f"was {called_cutoff}"
+                )
+
+        assert result["evidence_cutoff_source"] == "window_end_utc"
+        assert result["evidence_cutoff_utc"] == window_end.isoformat()
+
+    def test_fallback_to_generated_at_when_window_end_missing(self, mock_conn, history_mgr, reminder_state):
+        """If window_end_utc is absent, fallback explicitly to generated_at_utc."""
+        gen_at = datetime.now(timezone.utc) - timedelta(days=3)
+        entry = {
+            "review_id": "SWING-20260724-100000-aabbccdd",
+            "generated_at_utc": gen_at.isoformat(),
+            # Deliberately omit window_end_utc
+            "content_hash": "unique_no_wend",
+            "zip_sha256": "zsha",
+            "prompt_sha256": "psha",
+            "zip_size_bytes": 100,
+            "prompt_size_bytes": 50,
+            "signal_count": 10,
+            "closed_count": 5,
+            "selected_fingerprint": "fp_x",
+            "fingerprint_scope": "global",
+            "quality_level": "GOOD",
+            "quality_reasons": [],
+            "readiness_decision": "OBSERVE",
+            "prompt_status": "complete",
+            "complete_for_copilot": True,
+            "data_loaded_at_utc": gen_at.isoformat(),
+            "window_start_utc": (gen_at - timedelta(days=7)).isoformat(),
+            "window_start_colombia": (gen_at - timedelta(days=7) - timedelta(hours=-5)).isoformat(),
+            "window_end_colombia": (gen_at + timedelta(hours=-5)).isoformat(),
+            "strategy": STRATEGY_SCOPE,
+            "source_commit": "abc",
+            "supersedes_review_id": None,
+            "retained_until": (gen_at + timedelta(days=90)).isoformat(),
+            "experimental_count": 5,
+        }
+
+        history_mgr.persist_review(
+            review_id=entry["review_id"],
+            zip_bytes=b"z",
+            prompt_bytes=b"p",
+            metadata=entry,
+        )
+
+        with patch.dict(os.environ, {"SWING_TELEGRAM_MODE": "shadow"}):
+            with patch(
+                "src.swing_reminder_engine._count_new_signals_pg",
+                return_value=(TECH_MIN_NEW_SIGNALS, 0),
+            ) as mock_count:
+                result = evaluate_reminder(mock_conn, history_mgr, reminder_state)
+                called_cutoff = mock_count.call_args[0][1]
+                assert called_cutoff == gen_at, (
+                    f"Fallback cutoff should be generated_at_utc ({gen_at}), "
+                    f"was {called_cutoff}"
+                )
+
+        assert result["evidence_cutoff_source"] == "generated_at_utc"
+        assert result["evidence_cutoff_utc"] == gen_at.isoformat()
+
+    def test_cutoff_exposed_in_result_keys(self, mock_conn, history_mgr, reminder_state):
+        """evidence_cutoff_utc and evidence_cutoff_source must be in output."""
+        entry = _make_review_entry(generated_at_days_ago=TECH_MIN_DAYS, signal_count=10)
+        history_mgr.persist_review(
+            review_id=entry["review_id"],
+            zip_bytes=b"z",
+            prompt_bytes=b"p",
+            metadata=entry,
+        )
+
+        with patch.dict(os.environ, {"SWING_TELEGRAM_MODE": "shadow"}):
+            with patch(
+                "src.swing_reminder_engine._count_new_signals_pg",
+                return_value=(1, 0),
+            ):
+                result = evaluate_reminder(mock_conn, history_mgr, reminder_state)
+
+        assert "evidence_cutoff_utc" in result
+        assert "evidence_cutoff_source" in result
+        assert result["evidence_cutoff_utc"] is not None
+        assert result["evidence_cutoff_source"] == "window_end_utc"
+
+    def test_off_mode_still_exposes_cutoff_keys_as_none(self, mock_conn, history_mgr, reminder_state):
+        """Even in off mode, the result should contain the cutoff keys (as None)."""
+        with patch.dict(os.environ, {"SWING_TELEGRAM_MODE": "off"}):
+            result = evaluate_reminder(mock_conn, history_mgr, reminder_state)
+
+        assert "evidence_cutoff_utc" in result
+        assert "evidence_cutoff_source" in result
+        assert result["evidence_cutoff_utc"] is None
+        assert result["evidence_cutoff_source"] is None
+
+
 class TestLegacyUntouched:
     def test_telegram_delivery_unchanged(self):
         """Verify telegram_delivery.py hash matches known good state."""

@@ -236,6 +236,8 @@ def evaluate_reminder(
         "candidate_message": None,
         "evaluated_at_utc": now_iso,
         "control_change_allowed": False,
+        "evidence_cutoff_utc": None,
+        "evidence_cutoff_source": None,
     }
 
     # --- mode off → exit immediately ---
@@ -257,15 +259,38 @@ def evaluate_reminder(
     last_review_id: Optional[str] = None
     last_review_at: Optional[datetime] = None
 
+    # --- Determine evidence cutoff ---
+    # The last review covered signals up to window_end_utc (inclusive in
+    # half-open terms).  Signals created at or after window_end are new.
+    # Fallback: if window_end_utc is missing from the R4 index, use
+    # generated_at_utc explicitly — never silently continue with a wrong
+    # cutoff.
+    evidence_cutoff: Optional[datetime] = None
+    evidence_cutoff_source: Optional[str] = None
+
     if reviews:
         latest = reviews[0]  # sorted newest-first
         last_review_id = latest.get("review_id")
         last_review_at = _parse_r4_datetime(latest.get("generated_at_utc"))
 
+        # Primary: window_end_utc (half-open: signals at or after this are new)
+        wend = _parse_r4_datetime(latest.get("window_end_utc"))
+        if wend is not None:
+            evidence_cutoff = wend
+            evidence_cutoff_source = "window_end_utc"
+            last_review_at = wend  # use window_end for the cutoff, not generated_at
+        elif last_review_at is not None:
+            # Fallback explicit (generated_at_utc — less precise but available)
+            evidence_cutoff = last_review_at
+            evidence_cutoff_source = "generated_at_utc"
+
+    result["evidence_cutoff_utc"] = evidence_cutoff.isoformat() if evidence_cutoff else None
+    result["evidence_cutoff_source"] = evidence_cutoff_source
+
     # --- Get current signal evidence from PostgreSQL ---
     try:
-        if last_review_at is not None:
-            new_total, new_closed = _count_new_signals_pg(conn, last_review_at)
+        if evidence_cutoff is not None:
+            new_total, new_closed = _count_new_signals_pg(conn, evidence_cutoff)
         else:
             # No reviews yet — count all signals as "new"
             new_total, new_closed = _count_signals_all_time_pg(conn)
@@ -286,8 +311,8 @@ def evaluate_reminder(
 
     # --- Determine which reminder type applies (priority order) ---
     days_since_review = None
-    if last_review_at is not None:
-        days_since_review = (now - last_review_at).total_seconds() / 86400.0
+    if evidence_cutoff is not None:
+        days_since_review = (now - evidence_cutoff).total_seconds() / 86400.0
 
     readiness = _extract_readiness_from_reviews(reviews)
 
