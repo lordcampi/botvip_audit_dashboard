@@ -1,0 +1,33 @@
+[Unit]
+Description=Swing Strategy Review Reminder — shadow evaluation
+Documentation=https://github.com/lordcampi/botvip_audit_dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/botvip_audit_dashboard
+EnvironmentFile=/opt/botvip_audit_dashboard/.env
+ExecStart=/opt/botvip_audit_dashboard/.venv/bin/python -m src.swing_reminder_scheduler
+UMask=0077
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/botvip_audit_dashboard/data
+ReadOnlyPaths=/opt/botvip_audit_dashboard
+InaccessiblePaths=/opt/botvip_audit_dashboard/.git
+
+# Exit code: 0 for off/shadow/success; 1 for operational error
+# systemd treats non-zero as failed, which is correct for PG/state errors.
+SuccessExitStatus=0
+
+# No secrets in environment (token, chat_id are read from EnvironmentFile but
+# never printed or logged by the scheduler).
+# SWING_TELEGRAM_MODE=shadow is set in .env — no token required.
+
+[Install]
+WantedBy=multi-user.target

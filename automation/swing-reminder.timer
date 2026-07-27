@@ -1,0 +1,27 @@
+[Unit]
+Description=Swing Strategy Review Reminder Timer — every 6h shadow
+Documentation=https://github.com/lordcampi/botvip_audit_dashboard
+
+[Timer]
+# UTC schedule (Colombia UTC-5):
+#   03:00 UTC = 22:00 CO (previous day)
+#   09:00 UTC = 04:00 CO
+#   15:00 UTC = 10:00 CO
+#   21:00 UTC = 16:00 CO
+OnCalendar=*-*-* 03:00:00 UTC
+OnCalendar=*-*-* 09:00:00 UTC
+OnCalendar=*-*-* 15:00:00 UTC
+OnCalendar=*-*-* 21:00:00 UTC
+
+# Fire immediately if the system was powered off during a scheduled time
+Persistent=true
+
+# Exact schedule — no randomised jitter for review reminders
+# (production reminders must arrive at predictable times)
+RandomizedDelaySec=0
+
+# Unit to activate
+Unit=swing-reminder.service
+
+[Install]
+WantedBy=timers.target
