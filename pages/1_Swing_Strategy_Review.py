@@ -480,6 +480,51 @@ elif _allowed_quality:
 
                     _review_id = f"SWING-{_gen_at.strftime('%Y%m%d-%H%M')}"
 
+                    # --- R4B: Persist to history (best-effort, non-blocking) ---
+                    try:
+                        from src.swing_review_history import ReviewHistoryManager, generate_review_id, _compute_sha256_bytes
+                        _content_hash = _compute_sha256_bytes(_zip_bytes)
+                        _collision_free_id = generate_review_id(_gen_at, _content_hash)
+
+                        _mgr = ReviewHistoryManager()
+                        if not _mgr.is_index_valid():
+                            st.warning(
+                                "⚠️ Review history index is corrupt. The review was generated "
+                                "but NOT persisted to history. Previous reviews may still be "
+                                "recoverable — check data/swing_review_index.json.corrupted_*."
+                            )
+                        else:
+                            _metadata = {
+                                "generated_at_utc": _gen_at.isoformat(),
+                                "data_loaded_at_utc": data.get("loaded_at").isoformat() if data.get("loaded_at") else None,
+                                "window_start_utc": _start_utc.isoformat() if _start_utc else None,
+                                "window_end_utc": _end_utc.isoformat() if _end_utc else None,
+                                "window_start_colombia": _start_co.isoformat() if _start_co else None,
+                                "window_end_colombia": _end_co.isoformat() if _end_co else None,
+                                "strategy": "SWING_TREND_RECLAIM_V1",
+                                "selected_fingerprint": selected_fp,
+                                "fingerprint_scope": _scope,
+                                "signal_count": data.get("total_signals", 0),
+                                "closed_count": kpis.get("lifecycle_closed", 0),
+                                "experimental_count": data.get("experiments", {}).get("rows", 0),
+                                "quality_level": _ql,
+                                "quality_reasons": quality.get("reasons", []),
+                                "readiness_decision": _draft.get("readiness", {}).get("decision", "UNKNOWN"),
+                                "prompt_status": "READY",
+                                "complete_for_copilot": True,
+                                "source_commit": "190aed7",
+                            }
+                            _mgr.persist_review(
+                                _collision_free_id,
+                                _zip_bytes,
+                                _prompt_text.encode("utf-8"),
+                                _metadata,
+                            )
+                            # Update the short review_id to the collision-free one
+                            _review_id = _collision_free_id
+                    except Exception:
+                        pass  # history persistence failure is non-blocking
+
                     st.session_state["r3c_zip_bytes"] = _zip_bytes
                     st.session_state["r3c_prompt_text"] = _prompt_text
                     st.session_state["r3c_review_id"] = _review_id
@@ -541,6 +586,175 @@ else:
         st.info("📭 Datos no disponibles. Corrige el error de conexión para habilitar la descarga.")
 
 st.divider()
+
+# ---------------------------------------------------------------------------
+# R4B — Review History
+# ---------------------------------------------------------------------------
+with st.expander("📜 Review History", expanded=False):
+    try:
+        from src.swing_review_history import ReviewHistoryManager, _history_enabled
+
+        if not _history_enabled():
+            st.info("📭 Review history is disabled (SWING_HISTORY_ENABLED=false).")
+        else:
+            _mgr = ReviewHistoryManager()
+
+            # --- Index corruption check ------------------------------------------
+            if not _mgr.is_index_valid():
+                st.error(
+                    "🚫 **Review history index is corrupt.** Persist, delete, and "
+                    "cleanup operations are blocked. The generated review was NOT "
+                    "persisted. Previous reviews may still be recoverable — check "
+                    "`data/swing_review_index.json.corrupted_*` for the archived "
+                    "corrupt file."
+                )
+            else:
+                # --- Normal operation --------------------------------------------
+                _reviews = _mgr.list_reviews()
+                _total_size = (
+                    sum(e.get("zip_size_bytes", 0) + e.get("prompt_size_bytes", 0)
+                        for e in _reviews)
+                    if _reviews else 0
+                )
+
+                if not _reviews:
+                    st.info("No reviews in history yet. Generate a review above to persist it.")
+                else:
+                    col_sm, col_btn1, col_btn2 = st.columns([3, 1, 1])
+                    with col_sm:
+                        pct = min(100, int(len(_reviews) / 250 * 100))
+                        st.caption(
+                            f"**{len(_reviews)}** reviews stored · "
+                            f"**{_total_size / 1024:.0f} KB** total · "
+                            f"Oldest: {_reviews[-1].get('generated_at_utc', 'N/A')[:10]}"
+                        )
+                        st.progress(pct, text=f"Storage: {len(_reviews)}/250")
+                    with col_btn1:
+                        if st.button("🧹 Cleanup expired", help="Delete reviews past retention date"):
+                            _removed = _mgr.cleanup_expired()
+                            if _removed:
+                                st.success(f"Removed {_removed} expired reviews.")
+                            else:
+                                st.info("No expired reviews.")
+                    with col_btn2:
+                        if st.button("🗜️ FIFO cleanup", help="Delete oldest reviews if over 250 limit"):
+                            _removed = _mgr.cleanup_fifo()
+                            if _removed:
+                                st.success(f"FIFO removed {_removed} oldest reviews.")
+                            else:
+                                st.info("Below 250 limit, nothing removed.")
+
+                    # --- Review table --------------------------------------------
+                    _rows = []
+                    for _e in _reviews:
+                        _rows.append({
+                            "Review ID": _e.get("review_id", "?"),
+                            "Date (CO)": _e.get("window_start_colombia", "")[:10] if _e.get("window_start_colombia") else "?",
+                            "Fingerprint": (_e.get("selected_fingerprint", "?") or "?")[:12] + "…",
+                            "Scope": _e.get("fingerprint_scope", "?"),
+                            "Signals": _e.get("signal_count", 0),
+                            "Quality": _e.get("quality_level", "?"),
+                            "Readiness": _e.get("readiness_decision", "?"),
+                            "Size": f"{(_e.get('zip_size_bytes', 0) + _e.get('prompt_size_bytes', 0)) / 1024:.0f} KB",
+                        })
+
+                    st.dataframe(
+                        _rows,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Review ID": st.column_config.TextColumn(width="small"),
+                            "Date (CO)": st.column_config.TextColumn(width="small"),
+                            "Fingerprint": st.column_config.TextColumn(width="small"),
+                            "Scope": st.column_config.TextColumn(width="small"),
+                            "Signals": st.column_config.NumberColumn(width="small"),
+                            "Quality": st.column_config.TextColumn(width="small"),
+                            "Readiness": st.column_config.TextColumn(width="small"),
+                            "Size": st.column_config.TextColumn(width="small"),
+                        },
+                    )
+
+                    # --- Per-review actions -----------------------------------
+                    st.caption("**Actions** — select a review to re-download or delete")
+                    _review_ids = [e.get("review_id") for e in _reviews]
+                    _sel_review = st.selectbox(
+                        "Review ID",
+                        options=[""] + _review_ids,
+                        format_func=lambda x: x if x else "Select a review…",
+                        label_visibility="collapsed",
+                    )
+                    if _sel_review:
+                        _col_a1, _col_a2, _col_a3 = st.columns(3)
+                        with _col_a1:
+                            try:
+                                _zip_b, _prompt_b, _meta = _mgr.get_review(_sel_review)
+                                if _zip_b:
+                                    st.download_button(
+                                        f"📥 Re-download ZIP",
+                                        data=_zip_b,
+                                        file_name=f"SWING_REVIEW_PACK_R3B_{_sel_review}.zip",
+                                        mime="application/zip",
+                                        use_container_width=True,
+                                    )
+                            except ValueError as _ve:
+                                st.error(f"⚠️ Integrity check failed: {_ve}")
+                            except Exception:
+                                st.warning("⚠️ Could not retrieve ZIP.")
+                        with _col_a2:
+                            try:
+                                if not st.session_state.get("_r4b_prompt_cache"):
+                                    st.session_state["_r4b_prompt_cache"] = {}
+                                _cache = st.session_state["_r4b_prompt_cache"]
+                                if _sel_review not in _cache:
+                                    _zip_b2, _prompt_b2, _ = _mgr.get_review(_sel_review)
+                                    _cache[_sel_review] = _prompt_b2.decode("utf-8") if _prompt_b2 else None
+                                _prompt_str = _cache.get(_sel_review)
+                                if _prompt_str:
+                                    st.download_button(
+                                        f"📄 Re-download Prompt",
+                                        data=_prompt_str,
+                                        file_name=f"10_prompt_for_copilot_{_sel_review}.md",
+                                        mime="text/markdown",
+                                        use_container_width=True,
+                                    )
+                            except ValueError:
+                                st.warning("⚠️ Prompt integrity check failed.")
+                            except Exception:
+                                st.warning("⚠️ Could not retrieve prompt.")
+                        with _col_a3:
+                            _confirm_key = f"_r4b_delete_confirm_{_sel_review}"
+                            if _confirm_key not in st.session_state:
+                                st.session_state[_confirm_key] = False
+                            if not st.session_state[_confirm_key]:
+                                if st.button(f"🗑️ Delete", use_container_width=True, key=f"del_btn_{_sel_review}"):
+                                    st.session_state[_confirm_key] = True
+                            else:
+                                st.warning(f"Delete **{_sel_review}**? This cannot be undone.")
+                                _cc1, _cc2 = st.columns(2)
+                                with _cc1:
+                                    if st.button("✅ Confirm", use_container_width=True, key=f"confirm_{_sel_review}"):
+                                        _ok = _mgr.delete_review(_sel_review)
+                                        if _ok:
+                                            st.success(f"Deleted {_sel_review}.")
+                                            if "r3c_review_id" in st.session_state and st.session_state["r3c_review_id"] == _sel_review:
+                                                st.session_state["r3c_review_id"] = "Unknown"
+                                        else:
+                                            st.info("Already deleted (idempotent).")
+                                        st.session_state[_confirm_key] = False
+                                        # Clear prompt cache
+                                        st.session_state.get("_r4b_prompt_cache", {}).pop(_sel_review, None)
+                                with _cc2:
+                                    if st.button("❌ Cancel", use_container_width=True, key=f"cancel_{_sel_review}"):
+                                        st.session_state[_confirm_key] = False
+
+        st.caption(
+            "History is stored in `data/swing_reviews/`. "
+            "Index: `data/swing_review_index.json`. "
+            "Retention: 90 days / 250 max. "
+            "SHA-256 verified on re-download."
+        )
+    except Exception as _hist_exc:
+        st.error(f"⚠️ History UI error: {_hist_exc}")
 
 # ---------------------------------------------------------------------------
 # Footer

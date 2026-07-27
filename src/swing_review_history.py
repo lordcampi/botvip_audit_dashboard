@@ -621,6 +621,21 @@ class ReviewHistoryManager:
                 return True
         return False
 
+    def is_index_valid(self) -> bool:
+        """Check whether the on-disk index file exists and is valid JSON.
+
+        Returns ``False`` if the index is corrupt, missing, or was recovered
+        via ``_archive_corrupt_index``.
+        """
+        if not os.path.isfile(self._index_path):
+            return True  # no file → not corrupt, just empty
+        try:
+            with open(self._index_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return isinstance(data, dict) and isinstance(data.get("reviews"), list)
+        except (json.JSONDecodeError, OSError):
+            return False
+
     def verify_integrity(self, review_id: str) -> bool:
         """Check on-disk SHA-256 hashes against index entries. Returns True if
         the review files are intact."""
