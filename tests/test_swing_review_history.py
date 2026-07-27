@@ -97,9 +97,14 @@ def sample_metadata():
     }
 
 
-def _make_id(hour: int = 14, minute: int = 36) -> str:
-    """Build a valid review_id for a test."""
-    return f"SWING-20260727-{hour:02d}{minute:02d}"
+def _make_id(hour: int = 14, minute: int = 36, second: int = 0) -> str:
+    """Build a valid review_id in short format (no hash8 suffix)."""
+    return f"SWING-20260727-{hour:02d}{minute:02d}{second:02d}"
+
+
+def _make_id_with_hash(hour: int = 14, minute: int = 36, second: int = 0, content_hash: str = "a1b2c3d4") -> str:
+    """Build a valid review_id with hash8 suffix."""
+    return f"SWING-20260727-{hour:02d}{minute:02d}{second:02d}-{content_hash[:8]}"
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +115,11 @@ class TestReviewIdValidation:
         assert REVIEW_ID_REGEX.match("SWING-20260727-1436")
 
     def test_invalid_ids(self):
-        assert not REVIEW_ID_REGEX.match("SWING-20260727-143")   # too short
-        assert not REVIEW_ID_REGEX.match("SWING-20260727-14361")  # too long
-        assert not REVIEW_ID_REGEX.match("swing-20260727-1436")   # lowercase
-        assert not REVIEW_ID_REGEX.match("SWING-2026-07-27-1436") # wrong format
-        assert not REVIEW_ID_REGEX.match("")                       # empty
+        assert not REVIEW_ID_REGEX.match("SWING-20260727-143")     # too short
+        assert not REVIEW_ID_REGEX.match("SWING-20260727-1436178")  # 7 digits, exceeds \d{4,6}
+        assert not REVIEW_ID_REGEX.match("swing-20260727-1436")    # lowercase
+        assert not REVIEW_ID_REGEX.match("SWING-2026-07-27-1436")  # wrong format
+        assert not REVIEW_ID_REGEX.match("")                        # empty
 
     def test_validate_function_raises(self):
         with pytest.raises(ValueError):

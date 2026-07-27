@@ -23,7 +23,24 @@ from typing import Any, Optional
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-REVIEW_ID_REGEX = re.compile(r"^SWING-\d{8}-\d{4}$")
+REVIEW_ID_REGEX = re.compile(r"^SWING-\d{8}-\d{4,6}(-[a-f0-9]{8})?$")
+
+
+def generate_review_id(gen_at: datetime, content_hash: str) -> str:
+    """Generate a collision-free review_id.
+
+    Format: ``SWING-YYYYMMDD-HHMMSS-<hash8>`` where hash8 is the first 8 hex
+    characters of the ZIP content SHA-256.
+
+    Two reviews generated in the same second with different content produce
+    different IDs.  Two reviews with the same content produce the same ID
+    (and will be rejected as duplicates by persist_review).
+    """
+    ts = gen_at.strftime("%Y%m%d-%H%M%S")
+    short_hash = content_hash[:8]
+    return f"SWING-{ts}-{short_hash}"
+
+
 INDEX_SCHEMA_VERSION = "r4a_swing_review_history_v1"
 MAX_ZIP_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_PROMPT_BYTES = 5 * 1024 * 1024  # 5 MB (generous, individual file limit)
@@ -81,7 +98,7 @@ def _validate_review_id(review_id: str) -> None:
     if not isinstance(review_id, str) or not REVIEW_ID_REGEX.match(review_id):
         raise ValueError(
             f"Invalid review_id: {review_id!r}. "
-            f"Must match pattern SWING-YYYYMMDD-HHMM."
+            f"Must match pattern SWING-YYYYMMDD-HHMMSS[-hash8]."
         )
 
 

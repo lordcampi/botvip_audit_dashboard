@@ -31,6 +31,7 @@ id_ed25519*
 /data/swing_reviews/*
 !/data/swing_reviews/.gitkeep
 /data/swing_review_index.json
+/data/swing_review_index.lock
 /data/*.corrupted_*
 *.db
 *.sqlite
