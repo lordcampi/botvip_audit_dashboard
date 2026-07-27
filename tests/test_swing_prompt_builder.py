@@ -19,6 +19,7 @@ from src.swing_prompt_builder import (
     build_copilot_prompt,
     finalize_review_pack_with_prompt,
     build_final_swing_review_zip,
+    build_swing_review_pack_for_download,
     _validate_r3a_draft,
     R3B_SCHEMA_VERSION,
     RESTRICTIONS,
@@ -452,3 +453,118 @@ class TestReadinessInPrompt:
         prompt = build_copilot_prompt(_r3a_draft())
         for action in PROHIBITED:
             assert f"{action}" in prompt  # present as restriction, not recommendation
+
+
+# ---------------------------------------------------------------------------
+# build_swing_review_pack_for_download (R3B thin composition)
+# ---------------------------------------------------------------------------
+class TestDownloadHelper:
+    def test_returns_bytes(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        zip_bytes = build_swing_review_pack_for_download(
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        assert isinstance(zip_bytes, bytes)
+
+    def test_zip_has_11_files(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        zip_bytes = build_swing_review_pack_for_download(
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        bio = BytesIO(zip_bytes)
+        with zipfile.ZipFile(bio, "r") as zf:
+            names = zf.namelist()
+            assert len(names) == 11
+            assert "10_prompt_for_copilot.md" in names
+
+    def test_deterministic_same_inputs(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        args = (
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        z1 = build_swing_review_pack_for_download(*args)
+        z2 = build_swing_review_pack_for_download(*args)
+        assert z1 == z2
+
+    def test_manifest_schema_r3b(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        zip_bytes = build_swing_review_pack_for_download(
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        bio = BytesIO(zip_bytes)
+        with zipfile.ZipFile(bio, "r") as zf:
+            manifest = json.loads(zf.read("00_manifest.json"))
+            assert manifest["schema_version"] == R3B_SCHEMA_VERSION
+
+    def test_complete_for_copilot_true(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        zip_bytes = build_swing_review_pack_for_download(
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        bio = BytesIO(zip_bytes)
+        with zipfile.ZipFile(bio, "r") as zf:
+            manifest = json.loads(zf.read("00_manifest.json"))
+            assert manifest["complete_for_copilot"] is True
+
+    def test_files_under_limits(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        zip_bytes = build_swing_review_pack_for_download(
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        bio = BytesIO(zip_bytes)
+        with zipfile.ZipFile(bio, "r") as zf:
+            for name in zf.namelist():
+                content = zf.read(name).decode("utf-8")
+                assert len(content) <= MAX_CHARS_PER_FILE, f"{name} chars {len(content)} > {MAX_CHARS_PER_FILE}"
+                assert len(content.encode("utf-8")) <= 200_000, f"{name} bytes > 200000"
+
+    def test_files_count_includes_self(self):
+        from datetime import timedelta
+        data = _dashboard_data()
+        zip_bytes = build_swing_review_pack_for_download(
+            data, "fp12345678", "latest_only",
+            _gen_at() - timedelta(days=7), _gen_at(),
+            _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+            _gen_at(),
+        )
+        bio = BytesIO(zip_bytes)
+        with zipfile.ZipFile(bio, "r") as zf:
+            names = zf.namelist()
+            assert len(names) == 11
+
+    def test_no_filesystem_writes(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+        data = _dashboard_data()
+        with patch("builtins.open", side_effect=RuntimeError("no fs writes")):
+            zip_bytes = build_swing_review_pack_for_download(
+                data, "fp12345678", "latest_only",
+                _gen_at() - timedelta(days=7), _gen_at(),
+                _gen_at() - timedelta(days=7, hours=-5), _gen_at() + timedelta(hours=-5),
+                _gen_at(),
+            )
+            assert isinstance(zip_bytes, bytes)

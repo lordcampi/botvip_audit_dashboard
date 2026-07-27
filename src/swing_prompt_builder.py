@@ -412,3 +412,34 @@ def build_final_swing_review_zip(r3a_draft: dict, prompt_text: str | None = None
             zf.writestr(zinfo, content_bytes)
 
     return buffer.getvalue()
+
+
+def build_swing_review_pack_for_download(
+    dashboard_data: dict,
+    selected_fingerprint: str,
+    fingerprint_scope: str,
+    window_start_utc: Any,
+    window_end_utc: Any,
+    window_start_colombia: Any,
+    window_end_colombia: Any,
+    generated_at_utc: Any,
+) -> bytes:
+    """Build a complete R3B Swing Review Pack ZIP from dashboard data.
+
+    Thin composition of R3A build_review_contents() + R3B build_final_swing_review_zip().
+    Returns deterministic ZIP bytes in memory. Never writes to disk.
+    Intended as the single call-site for the Streamlit download button.
+    """
+    from .swing_review_pack_builder import build_review_contents
+
+    r3a_draft = build_review_contents(
+        dashboard_data,
+        selected_fingerprint,
+        fingerprint_scope,
+        window_start_utc,
+        window_end_utc,
+        window_start_colombia,
+        window_end_colombia,
+        generated_at_utc,
+    )
+    return build_final_swing_review_zip(r3a_draft)
