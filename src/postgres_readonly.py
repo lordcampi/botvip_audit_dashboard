@@ -180,7 +180,9 @@ def read_sql_df_pg(
         raise ValueError("WITH query contains write operations (INSERT/UPDATE/DELETE/TRUNCATE/CREATE/DROP/ALTER) – rejected")
 
     try:
-        return pd.read_sql_query(query, conn, params=params or ())
+        # pandas requires params=None for no-parameter queries — an empty
+        # tuple/list is wrapped by pandas and triggers IndexError in psycopg2.
+        return pd.read_sql_query(query, conn, params=(params if params else None))
     except Exception as e:
         raise RuntimeError(_sanitize_error_message(e)) from e
 
