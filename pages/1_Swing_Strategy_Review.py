@@ -397,30 +397,121 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.subheader("🧪 SWING EXPERIMENTAL / SHADOW — UNIVERSE PROBE (SHORT)")
 st.caption(
-    "NOT OFFICIAL — internal SHORT-only universe probe (`swing_short_universe_probe_v1`). "
-    "Runs the same SWING_TREND_RECLAIM strategy across additional pairs. "
+    "NOT OFFICIAL — internal SHORT-only universe probe (`swing_short_universe_probe_v1`) "
+    "running across 20 additional pairs (B+ · 8 pairs, C · 12 pairs). "
+    "Runs the same SWING_TREND_RECLAIM strategy. "
     "**Never** sent to Telegram. **Never** executed on Binance Demo."
 )
 
 exp = data.get("experiments", {})
 if exp.get("available"):
-    c1, c2, c3 = st.columns(3)
+    probe_table = exp.get("table", pd.DataFrame())
+    summary_tiers = exp.get("summary_by_tier", {})
+    symbol_table = exp.get("summary_by_symbol", pd.DataFrame())
+
+    # --- Header metrics ----------------------------------------------------
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.metric("Probe signals", exp.get("rows", 0))
     with c2:
-        probe_table = exp.get("table", pd.DataFrame())
-        tiers = sorted(probe_table["tier"].dropna().unique()) if not probe_table.empty and "tier" in probe_table.columns else []
-        st.metric("Tiers", ", ".join(tiers) if tiers else "N/A")
+        st.metric("Pairs tracked", len(symbol_table) if not symbol_table.empty else 0)
     with c3:
-        if not probe_table.empty and "result_r" in probe_table.columns:
-            closed_mask = probe_table["status"].astype(str).str.upper().str.startswith("PROBE_")
-            closed_r = pd.to_numeric(probe_table.loc[closed_mask, "result_r"], errors="coerce").dropna()
-            st.metric("Closed evaluable", len(closed_r))
-        else:
-            st.metric("Closed evaluable", "N/A")
+        total_open = int(sum(t.get("open", 0) for t in summary_tiers.values()))
+        st.metric("Open", total_open)
+    with c4:
+        total_closed = int(sum(t.get("closed", 0) for t in summary_tiers.values()))
+        total_wins = int(sum(t.get("wins", 0) for t in summary_tiers.values()))
+        total_losses = int(sum(t.get("losses", 0) for t in summary_tiers.values()))
+        wr = round(total_wins / max(1, total_wins + total_losses) * 100, 1) if (total_wins + total_losses) > 0 else None
+        st.metric("Closed", total_closed)
+        st.caption(f"Combined WR: {wr}%" if wr is not None else "Combined WR: N/A")
 
+    # --- Per-tier summary panels ------------------------------------------
+    tier_cols = st.columns(max(1, len(summary_tiers)))
+    tier_col_map = {"BPLUS": "B+", "C": "C"}
+    for i, (tier, tdata) in enumerate(sorted(summary_tiers.items())):
+        with tier_cols[i]:
+            tier_label = tier_col_map.get(tier, str(tier))
+            st.subheader(f"🥉 Tier {tier_label}")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("Signals", tdata.get("signals", 0))
+                st.metric("Wins", tdata.get("wins", 0))
+                st.metric("Losses", tdata.get("losses", 0))
+                st.metric("Non-evaluable", tdata.get("non_evaluable", 0))
+            with col_b:
+                st.metric("Open", tdata.get("open", 0))
+                st.metric("Closed", tdata.get("closed", 0))
+                t_r = tdata.get("total_r")
+                st.metric("Total R", f"{t_r:.2f}" if t_r is not None else "N/A")
+                a_r = tdata.get("avg_r")
+                st.metric("Avg R", f"{a_r:.2f}" if a_r is not None else "N/A")
+
+            wr_t = tdata.get("win_rate")
+            st.caption(f"**Win rate:** {wr_t}%" if wr_t is not None else "**Win rate:** N/A")
+
+    st.divider()
+
+    # --- Per-symbol summary table -----------------------------------------
+    st.markdown("**📈 Performance por símbolo**")
+    if not symbol_table.empty:
+        symbol_display = symbol_table.copy()
+        tier_display_col = symbol_display["tier"].map(tier_col_map).fillna(symbol_display["tier"])
+        symbol_display.insert(0, "Tier", tier_display_col)
+        symbol_display = symbol_display.drop(columns=["tier"])
+
+        st.dataframe(
+            symbol_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Tier": st.column_config.TextColumn("Tier", width="small"),
+                "symbol": st.column_config.TextColumn("Symbol", width="medium"),
+                "signals": st.column_config.NumberColumn("Signals", width="small"),
+                "open": st.column_config.NumberColumn("Open", width="small"),
+                "closed": st.column_config.NumberColumn("Closed", width="small"),
+                "wins": st.column_config.NumberColumn("Wins", width="small"),
+                "losses": st.column_config.NumberColumn("Losses", width="small"),
+                "non_evaluable": st.column_config.NumberColumn("Non-eval", width="small"),
+                "total_r": st.column_config.NumberColumn("Total R", width="small"),
+                "avg_r": st.column_config.NumberColumn("Avg R", width="small"),
+                "win_rate": st.column_config.NumberColumn("WR %", width="small"),
+            },
+        )
+    else:
+        st.info("No symbol-level aggregates available.")
+
+    st.markdown("**🔬 Detalle por setup**")
     if not probe_table.empty:
-        st.dataframe(probe_table, use_container_width=True, hide_index=True)
+        # Filters
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            symbols_p = sorted(probe_table["symbol"].dropna().unique()) if "symbol" in probe_table.columns else []
+            sel_sym_p = st.multiselect("Symbol", symbols_p, default=[], key="probe_symbol")
+        with fc2:
+            tiers_p = sorted(probe_table["tier"].dropna().unique()) if "tier" in probe_table.columns else []
+            sel_tier_p = st.multiselect("Tier", tiers_p, default=[], key="probe_tier")
+        with fc3:
+            statuses_p = sorted(probe_table["status"].dropna().unique()) if "status" in probe_table.columns else []
+            sel_status_p = st.multiselect("Status", statuses_p, default=[], key="probe_status")
+
+        filtered_p = probe_table.copy()
+        if sel_sym_p and "symbol" in filtered_p.columns:
+            filtered_p = filtered_p[filtered_p["symbol"].isin(sel_sym_p)]
+        if sel_tier_p and "tier" in filtered_p.columns:
+            filtered_p = filtered_p[filtered_p["tier"].isin(sel_tier_p)]
+        if sel_status_p and "status" in filtered_p.columns:
+            filtered_p = filtered_p[filtered_p["status"].isin(sel_status_p)]
+
+        st.dataframe(filtered_p, use_container_width=True, hide_index=True)
+
+        csv_p = filtered_p.to_csv(index=False)
+        st.download_button(
+            "📥 Download probe CSV",
+            data=csv_p,
+            file_name=f"swing_universe_probe_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+        )
 else:
     st.info(
         "No universe probe data available in this window. "

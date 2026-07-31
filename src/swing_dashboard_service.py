@@ -884,6 +884,36 @@ def _build_signal_table(signals: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
+# ---------------------------------------------------------------------------
+# Universe probe outcome classifier
+# ---------------------------------------------------------------------------
+_PROBE_CLOSED_WIN = {"PROBE_PRIMARY_TP"}
+_PROBE_CLOSED_LOSS = {"PROBE_STOP_LOSS"}
+_PROBE_CLOSED_NON_EVALUABLE = {"PROBE_TIME_STOP", "PROBE_EXPIRED", "PROBE_INVALIDATED"}
+_PROBE_OPEN = {"PROBE_PENDING", "PROBE_ACTIVATED"}
+
+
+def _classify_probe_status(status_val) -> tuple[str, str]:
+    """Classify a PROBE_* lifecycle status into (lifecycle, outcome).
+
+    Returns:
+        lifecycle: "OPEN" | "CLOSED" | "UNKNOWN"
+        outcome:   "WIN" | "LOSS" | "NON_EVALUABLE" | None
+    """
+    status = str(status_val or "").upper().strip()
+    if status in _PROBE_CLOSED_WIN:
+        return "CLOSED", "WIN"
+    if status in _PROBE_CLOSED_LOSS:
+        return "CLOSED", "LOSS"
+    if status in _PROBE_CLOSED_NON_EVALUABLE:
+        return "CLOSED", "NON_EVALUABLE"
+    if status in _PROBE_OPEN:
+        return "OPEN", None
+    if status.startswith("PROBE_"):
+        return "CLOSED", "NON_EVALUABLE"
+    return "UNKNOWN", None
+
+
 def _build_experiments_panel(experiments: pd.DataFrame) -> dict:
     """Build the experimental/shadow panel.
 
@@ -891,6 +921,16 @@ def _build_experiments_panel(experiments: pd.DataFrame) -> dict:
     the SHORT-only multi-pair experiment running the same strategy across
     additional pairs. These rows live in swing_experimental_lifecycles and
     are NEVER sent to Telegram and NEVER executed on Binance Demo.
+
+    Returns:
+        {
+            "available": bool,
+            "rows": int,
+            "table": DataFrame (per-setup rows),
+            "summary_by_tier": {tier: {...metrics}},
+            "summary_by_symbol": DataFrame (per tier+symbol),
+            "variant_id": str,
+        }
     """
     if experiments is None or experiments.empty:
         return {"available": False, "rows": 0}
@@ -915,13 +955,17 @@ def _build_experiments_panel(experiments: pd.DataFrame) -> dict:
         payload = row.get("payload_json")
         obj = _safe_json_load(payload) if payload else None
         obj = obj if isinstance(obj, dict) else {}
+        status_raw = row.get("status")
+        lifecycle, outcome = _classify_probe_status(status_raw)
         enriched_rows.append({
             "setup_id": row.get("setup_id"),
             "symbol": row.get("symbol"),
             "side": row.get("side"),
             "tier": obj.get("tier") or "OTHER",
             "cluster": obj.get("cluster") or "OTHER",
-            "status": row.get("status"),
+            "status": status_raw,
+            "lifecycle": lifecycle,
+            "outcome": outcome,
             "result_r": obj.get("result_r"),
             "reason": obj.get("reason"),
             "entry_price": obj.get("entry_price"),
@@ -934,10 +978,91 @@ def _build_experiments_panel(experiments: pd.DataFrame) -> dict:
     if probe_df.empty:
         return {"available": False, "rows": 0}
 
+    # Normalise result_r to numeric; fallback to physical result_r when the
+    # payload does not carry it (defensive — never invent zeros).
+    if "result_r" in probe_df.columns:
+        probe_df["result_r"] = pd.to_numeric(probe_df["result_r"], errors="coerce")
+    if "result_r" not in probe_df.columns or probe_df["result_r"].isna().all():
+        if "result_r" in df.columns:
+            r_physical = pd.to_numeric(df["result_r"], errors="coerce")
+            probe_df["result_r"] = r_physical.values[: len(probe_df)]
+    if "result_r" not in probe_df.columns:
+        probe_df["result_r"] = pd.Series(dtype="float64")
+
+    # --- Per-tier summary --------------------------------------------------
+    tiers = sorted(probe_df["tier"].dropna().unique())
+    summary_by_tier = {}
+    for tier in tiers:
+        tier_df = probe_df[probe_df["tier"] == tier]
+        closed_mask = tier_df["lifecycle"] == "CLOSED"
+        wins = int((tier_df["outcome"] == "WIN").sum())
+        losses = int((tier_df["outcome"] == "LOSS").sum())
+        non_evaluable = int((closed_mask & (tier_df["outcome"] == "NON_EVALUABLE")).sum())
+        open_count = int((tier_df["lifecycle"] == "OPEN").sum())
+        unknown_count = int((tier_df["lifecycle"] == "UNKNOWN").sum())
+
+        r_vals = pd.to_numeric(tier_df.loc[closed_mask & tier_df["outcome"].isin(["WIN", "LOSS"]), "result_r"], errors="coerce").dropna()
+        total_r = round(float(r_vals.sum()), 4) if not r_vals.empty else None
+        avg_r = round(float(r_vals.mean()), 4) if not r_vals.empty else None
+        wr = round(wins / max(1, wins + losses) * 100, 1) if (wins + losses) > 0 else None
+
+        summary_by_tier[tier] = {
+            "tier": tier,
+            "signals": int(len(tier_df)),
+            "open": open_count,
+            "closed": int(closed_mask.sum()),
+            "wins": wins,
+            "losses": losses,
+            "non_evaluable": non_evaluable,
+            "unknown": unknown_count,
+            "total_r": total_r,
+            "avg_r": avg_r,
+            "win_rate": wr,
+        }
+
+    # --- Per-symbol summary (grouped by tier + symbol) ---------------------
+    symbol_rows = []
+    for (tier, symbol), grp in probe_df.groupby(["tier", "symbol"], dropna=False):
+        closed_mask = grp["lifecycle"] == "CLOSED"
+        wins = int((grp["outcome"] == "WIN").sum())
+        losses = int((grp["outcome"] == "LOSS").sum())
+        non_evaluable = int((closed_mask & (grp["outcome"] == "NON_EVALUABLE")).sum())
+        open_count = int((grp["lifecycle"] == "OPEN").sum())
+        r_vals = pd.to_numeric(grp.loc[closed_mask & grp["outcome"].isin(["WIN", "LOSS"]), "result_r"], errors="coerce").dropna()
+        total_r = round(float(r_vals.sum()), 4) if not r_vals.empty else None
+        avg_r = round(float(r_vals.mean()), 4) if not r_vals.empty else None
+        wr = round(wins / max(1, wins + losses) * 100, 1) if (wins + losses) > 0 else None
+        symbol_rows.append({
+            "tier": tier,
+            "symbol": symbol,
+            "signals": int(len(grp)),
+            "open": open_count,
+            "closed": int(closed_mask.sum()),
+            "wins": wins,
+            "losses": losses,
+            "non_evaluable": non_evaluable,
+            "total_r": total_r,
+            "avg_r": avg_r,
+            "win_rate": wr,
+        })
+    symbol_table = pd.DataFrame(symbol_rows)
+    if not symbol_table.empty:
+        symbol_table = symbol_table.sort_values(
+            ["tier", "total_r"], ascending=[True, False]
+        ).reset_index(drop=True)
+
+    # Keep the detail table ordered by tier then updated_at (newest first)
+    sort_cols = ["tier", "updated_at"] if "updated_at" in probe_df.columns else ["tier"]
+    probe_df = probe_df.sort_values(
+        sort_cols, ascending=[True, False] if "updated_at" in probe_df.columns else [True]
+    ).reset_index(drop=True)
+
     return {
         "available": True,
         "rows": len(probe_df),
         "table": probe_df,
+        "summary_by_tier": summary_by_tier,
+        "summary_by_symbol": symbol_table,
         "variant_id": "swing_short_universe_probe_v1",
     }
 

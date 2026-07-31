@@ -20,6 +20,7 @@ from src.swing_dashboard_service import (
     _build_experiments_panel,
     _build_shadow_panel,
     _build_scanner_panel,
+    _classify_probe_status,
     is_swing_trend_reclaim_signal,
     filter_swing_official_signals,
     extract_nested_timestamp,
@@ -535,6 +536,144 @@ class TestExperimentsPanel:
         assert result["available"] is True
         assert result["rows"] == 1
         assert result["table"]["side"].dropna().astype(str).str.upper().iloc[0] == "SHORT"
+
+    def test_summary_by_tier_bplus_and_c(self):
+        """summary_by_tier aggregates metrics per tier (BPLUS / C)."""
+        df = pd.DataFrame({
+            "id": [1, 2, 3, 4],
+            "variant_id": ["swing_short_universe_probe_v1"] * 4,
+            "side": ["SHORT"] * 4,
+            "symbol": ["HYPEUSDT", "SUIUSDT", "DOTUSDT", "ATOMUSDT"],
+            "status": ["PROBE_PRIMARY_TP", "PROBE_STOP_LOSS", "PROBE_TIME_STOP", "PROBE_PENDING"],
+            "payload_json": [
+                '{"tier": "BPLUS", "cluster": "OTHER", "result_r": 2.0}',
+                '{"tier": "BPLUS", "cluster": "AI", "result_r": -1.0}',
+                '{"tier": "C", "cluster": "OTHER", "result_r": null}',
+                '{"tier": "C", "cluster": "AI", "result_r": null}',
+            ],
+        })
+        result = _build_experiments_panel(df)
+        assert result["available"] is True
+        summary = result["summary_by_tier"]
+        assert set(summary.keys()) == {"BPLUS", "C"}
+
+        bplus = summary["BPLUS"]
+        assert bplus["signals"] == 2
+        assert bplus["closed"] == 2
+        assert bplus["open"] == 0
+        assert bplus["wins"] == 1
+        assert bplus["losses"] == 1
+        assert bplus["total_r"] == pytest.approx(1.0)
+        assert bplus["avg_r"] == pytest.approx(0.5)
+        assert bplus["win_rate"] == 50.0
+
+        tier_c = summary["C"]
+        assert tier_c["signals"] == 2
+        assert tier_c["closed"] == 1
+        assert tier_c["open"] == 1
+        assert tier_c["wins"] == 0
+        assert tier_c["losses"] == 0
+        assert tier_c["non_evaluable"] == 1
+        assert tier_c["total_r"] is None
+
+    def test_summary_by_symbol_groups_tier_and_symbol(self):
+        """summary_by_symbol aggregates per (tier, symbol) pair."""
+        df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "variant_id": ["swing_short_universe_probe_v1"] * 3,
+            "side": ["SHORT"] * 3,
+            "symbol": ["HYPEUSDT", "HYPEUSDT", "DOTUSDT"],
+            "status": ["PROBE_PRIMARY_TP", "PROBE_STOP_LOSS", "PROBE_PENDING"],
+            "payload_json": [
+                '{"tier": "BPLUS", "cluster": "OTHER", "result_r": 2.0}',
+                '{"tier": "BPLUS", "cluster": "AI", "result_r": -1.0}',
+                '{"tier": "C", "cluster": "OTHER", "result_r": null}',
+            ],
+        })
+        result = _build_experiments_panel(df)
+        symbol_table = result["summary_by_symbol"]
+        assert not symbol_table.empty
+        assert "tier" in symbol_table.columns
+        assert "symbol" in symbol_table.columns
+
+        hype = symbol_table[symbol_table["symbol"] == "HYPEUSDT"].iloc[0]
+        assert hype["tier"] == "BPLUS"
+        assert hype["signals"] == 2
+        assert hype["wins"] == 1
+        assert hype["losses"] == 1
+        assert hype["total_r"] == pytest.approx(1.0)
+
+        dot = symbol_table[symbol_table["symbol"] == "DOTUSDT"].iloc[0]
+        assert dot["tier"] == "C"
+        assert dot["open"] == 1
+        assert dot["closed"] == 0
+
+    def test_result_r_fallback_to_physical_column(self):
+        """When payload lacks result_r, fall back to physical result_r column."""
+        df = pd.DataFrame({
+            "id": [1, 2],
+            "variant_id": ["swing_short_universe_probe_v1"] * 2,
+            "side": ["SHORT", "SHORT"],
+            "symbol": ["HYPEUSDT", "SUIUSDT"],
+            "status": ["PROBE_PRIMARY_TP", "PROBE_STOP_LOSS"],
+            "result_r": [2.5, -0.75],
+            "payload_json": ['{"tier": "BPLUS"}', '{"tier": "BPLUS"}'],
+        })
+        result = _build_experiments_panel(df)
+        table = result["table"]
+        assert table["result_r"].dropna().to_list()[0] == pytest.approx(2.5)
+        assert table["result_r"].dropna().to_list()[1] == pytest.approx(-0.75)
+        bplus = result["summary_by_tier"]["BPLUS"]
+        assert bplus["total_r"] == pytest.approx(1.75)
+
+
+class TestProbeStatusClassifier:
+    """Tests for _classify_probe_status."""
+
+    def test_primary_tp_is_win(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_PRIMARY_TP")
+        assert lifecycle == "CLOSED"
+        assert outcome == "WIN"
+
+    def test_stop_loss_is_loss(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_STOP_LOSS")
+        assert lifecycle == "CLOSED"
+        assert outcome == "LOSS"
+
+    def test_time_stop_non_evaluable(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_TIME_STOP")
+        assert lifecycle == "CLOSED"
+        assert outcome == "NON_EVALUABLE"
+
+    def test_expired_non_evaluable(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_EXPIRED")
+        assert lifecycle == "CLOSED"
+        assert outcome == "NON_EVALUABLE"
+
+    def test_invalidated_non_evaluable(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_INVALIDATED")
+        assert lifecycle == "CLOSED"
+        assert outcome == "NON_EVALUABLE"
+
+    def test_pending_is_open(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_PENDING")
+        assert lifecycle == "OPEN"
+        assert outcome is None
+
+    def test_activated_is_open(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_ACTIVATED")
+        assert lifecycle == "OPEN"
+        assert outcome is None
+
+    def test_unknown_probe_status_non_evaluable(self):
+        lifecycle, outcome = _classify_probe_status("PROBE_WHATEVER")
+        assert lifecycle == "CLOSED"
+        assert outcome == "NON_EVALUABLE"
+
+    def test_none_returns_unknown(self):
+        lifecycle, outcome = _classify_probe_status(None)
+        assert lifecycle == "UNKNOWN"
+        assert outcome is None
 
 
 class TestShadowPanel:
