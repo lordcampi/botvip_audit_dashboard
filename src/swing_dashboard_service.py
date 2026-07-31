@@ -676,6 +676,101 @@ def _compute_signal_kpis(signals: pd.DataFrame) -> dict:
     }
 
 
+def _compute_experimental_kpis(probe_df: pd.DataFrame) -> dict:
+    """Compute KPIs for the universe probe, mirroring _compute_signal_kpis.
+
+    Operates on the enriched probe DataFrame produced by
+    _build_experiments_panel (columns: lifecycle, outcome, result_r,
+    status, created_at, setup_id).
+
+    Returns the same dict shape as _compute_signal_kpis so the UI can
+    render identically. `result_be` is always 0 for probes; non-evaluable
+    closes are exposed separately via `non_evaluable`.
+    """
+    if probe_df is None or probe_df.empty:
+        return {"available": False}
+
+    total = len(probe_df)
+    status = (
+        probe_df.get("status", pd.Series(dtype=str)).astype(str).str.upper()
+        if "status" in probe_df.columns
+        else pd.Series(dtype=str)
+    )
+    lifecycle = probe_df.get("lifecycle", pd.Series(dtype=str))
+    outcome = probe_df.get("outcome", pd.Series(dtype=str))
+
+    # ---- A. Lifecycle status ----
+    pending = int(status.isin(["PROBE_PENDING"]).sum()) if not status.empty else 0
+    activated = int(status.isin(["PROBE_ACTIVATED"]).sum()) if not status.empty else 0
+    closed = int((lifecycle == "CLOSED").sum()) if not lifecycle.empty else 0
+    cancelled = int(status.str.contains("CANCEL", na=False).sum()) if not status.empty else 0
+    expired = int(status.str.contains("EXPIR", na=False).sum()) if not status.empty else 0
+    other = max(0, total - pending - activated - closed - cancelled - expired)
+
+    # ---- B. Official result ----
+    win = int((outcome == "WIN").sum()) if not outcome.empty else 0
+    loss = int((outcome == "LOSS").sum()) if not outcome.empty else 0
+    non_evaluable = int((outcome == "NON_EVALUABLE").sum()) if not outcome.empty else 0
+    be = 0
+    unknown = max(0, total - win - loss - be - non_evaluable)
+
+    # ---- C. R metrics (closed evaluable only: WIN/LOSS) ----
+    closed_evaluable = win + loss
+    total_r = None
+    avg_r = None
+    pf = None
+    pf_warning = None
+
+    if "result_r" in probe_df.columns:
+        r_vals = pd.to_numeric(probe_df["result_r"], errors="coerce")
+        evaluable_mask = outcome.isin(["WIN", "LOSS"]) if not outcome.empty else pd.Series(False, index=probe_df.index)
+        closed_r = r_vals[evaluable_mask].dropna()
+        if not closed_r.empty:
+            total_r = round(float(closed_r.sum()), 4)
+            avg_r = round(float(closed_r.mean()), 4)
+            positive = closed_r[closed_r > 0].sum()
+            negative = abs(closed_r[closed_r < 0].sum())
+            if negative > 0:
+                pf = round(float(positive / negative), 4)
+            elif positive > 0:
+                pf = "∞"
+                pf_warning = "Sample warning: no losses with result_r in closed signals"
+
+    # Latest signal: most recent created_at → setup_id
+    latest_id = None
+    if "created_at" in probe_df.columns and "setup_id" in probe_df.columns:
+        sorted_df = probe_df.sort_values("created_at", ascending=False)
+        if not sorted_df.empty:
+            latest_id = sorted_df["setup_id"].iloc[0]
+
+    return {
+        "available": True,
+        "total": total,
+        # Lifecycle status
+        "lifecycle_pending": pending,
+        "lifecycle_activated": activated,
+        "lifecycle_closed": closed,
+        "lifecycle_cancelled": cancelled,
+        "lifecycle_expired": expired,
+        "lifecycle_other": other,
+        # Official result (probe outcomes)
+        "result_win": win,
+        "result_loss": loss,
+        "result_be": be,
+        "result_unknown": unknown,
+        "non_evaluable": non_evaluable,
+        "result_canonical_count": 0,
+        "result_derived_count": 0,
+        # R metrics
+        "closed_evaluable": closed_evaluable,
+        "total_r": total_r,
+        "avg_r": avg_r,
+        "profit_factor": pf,
+        "pf_warning": pf_warning,
+        "latest_signal_id": latest_id,
+    }
+
+
 def _build_executability(signals: pd.DataFrame) -> dict:
     if signals is None or signals.empty:
         return {"available": False}
@@ -1064,6 +1159,7 @@ def _build_experiments_panel(experiments: pd.DataFrame) -> dict:
         "summary_by_tier": summary_by_tier,
         "summary_by_symbol": symbol_table,
         "variant_id": "swing_short_universe_probe_v1",
+        "kpis": _compute_experimental_kpis(probe_df),
     }
 
 

@@ -20,6 +20,7 @@ from src.swing_dashboard_service import (
     _compute_signal_kpis,
     _build_executability,
     _build_signal_table,
+    _build_shadow_panel,
     filter_signals_by_fingerprint,
     _determine_latest_fingerprint,
     _fingerprint_segmentation,
@@ -143,11 +144,13 @@ elif sel_fp_mode == "All fingerprints — MIXED CONFIG":
 if signals_raw is not None and not signals_raw.empty and selected_fp and selected_fp != "ALL":
     fp_signals, fp_incl, fp_excl = filter_signals_by_fingerprint(signals_raw, selected_fp)
     if fp_signals is not None and not fp_signals.empty:
-        # Recompute KPIs and table for selected fingerprint
+        # Recompute KPIs, table and shadow for selected fingerprint so every
+        # metric on the page is consistent with the filtered set.
         data["total_signals"] = fp_incl
         data["signal_kpis"] = _compute_signal_kpis(fp_signals)
         data["signal_table"] = _build_signal_table(fp_signals)
         data["executability"] = _build_executability(fp_signals)
+        data["shadow"] = _build_shadow_panel(fp_signals)
         data["fingerprint_segmentation"] = _fingerprint_segmentation(fp_signals, selected_fp)
         data["data_quality"] = assess_data_quality(fp_signals, selected_fp)
         data["excluded_by_fingerprint"] = fp_excl
@@ -162,6 +165,7 @@ elif selected_fp == "ALL":
     data["signal_kpis"] = _compute_signal_kpis(signals_raw)
     data["signal_table"] = _build_signal_table(signals_raw)
     data["executability"] = _build_executability(signals_raw)
+    data["shadow"] = _build_shadow_panel(signals_raw)
     data["fingerprint_segmentation"] = _fingerprint_segmentation(signals_raw, None)
     data["data_quality"] = assess_data_quality(signals_raw, None)
 
@@ -203,321 +207,382 @@ if quality.get("reasons"):
 st.divider()
 
 # ---------------------------------------------------------------------------
-# KPI Cards
+# TABS — Approved pairs vs Universe probe (experimental)
 # ---------------------------------------------------------------------------
-kpis = data.get("signal_kpis", {})
-if kpis.get("available"):
-    st.subheader("📊 Signal KPIs")
+tab_approved, tab_probe = st.tabs(
+    [
+        "📊 Approved (Telegram + Demo)",
+        "🔬 Universe Probe (Experimental)",
+    ]
+)
 
-    st.caption("Lifecycle status (dimension A) and official result (dimension B)")
-
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    with c1:
-        st.metric("Total", kpis.get("total", 0))
-    with c2:
-        st.metric("Pending", kpis.get("lifecycle_pending", 0))
-    with c3:
-        st.metric("Activated", kpis.get("lifecycle_activated", 0))
-    with c4:
-        st.metric("Closed", kpis.get("lifecycle_closed", 0))
-    with c5:
-        st.metric("Cancelled", kpis.get("lifecycle_cancelled", 0))
-    with c6:
-        st.metric("Expired", kpis.get("lifecycle_expired", 0))
-    with c7:
-        st.metric("Other", kpis.get("lifecycle_other", 0))
-
-    st.markdown("**Official Result**")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Win", kpis.get("result_win", 0))
-    with c2:
-        st.metric("Loss", kpis.get("result_loss", 0))
-    with c3:
-        st.metric("BE", kpis.get("result_be", 0))
-    with c4:
-        st.metric("Unknown", kpis.get("result_unknown", 0))
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        pf = kpis.get("profit_factor")
-        st.metric("Profit Factor", str(pf) if pf is not None else "N/A")
-        pw = kpis.get("pf_warning")
-        if pw:
-            st.caption(f"⚠️ {pw}")
-    with c2:
-        tr = kpis.get("total_r")
-        st.metric("Total R", f"{tr:.2f}" if tr is not None else "N/A")
-    with c3:
-        ar = kpis.get("avg_r")
-        st.metric("Avg R", f"{ar:.2f}" if ar is not None else "N/A")
-    with c4:
-        st.metric("Closed Evaluable", kpis.get("closed_evaluable", 0))
-        st.metric("Latest Signal", kpis.get("latest_signal_id", "N/A"))
-
-    st.divider()
-
-# ---------------------------------------------------------------------------
-# Executability Panel
-# ---------------------------------------------------------------------------
-exec_data = data.get("executability", {})
-if exec_data.get("available"):
-    st.subheader("⚡ Executability")
-    st.caption("same_market_bar and execution_detached are different concepts")
-
-    smb = exec_data.get("same_market_bar", {})
-    ed = exec_data.get("execution_detached", {})
-    demo = exec_data.get("demo_compatibility", {})
-    rbf = exec_data.get("retroactive_bar_fill", {})
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
-        st.markdown("**same_market_bar**")
-        st.metric("True", smb.get("true", 0))
-        st.metric("False", smb.get("false", 0))
-        st.metric("N/A", smb.get("none", 0))
-        st.caption(f"Derived: {smb.get('derived', 0)} | Canonical: {smb.get('canonical', 0)}")
-
-    with c2:
-        st.markdown("**Execution Detached**")
-        st.metric("True", ed.get("true", 0))
-        st.metric("False", ed.get("false", 0))
-        st.metric("N/A", ed.get("none", 0))
-
-    with c3:
-        st.markdown("**Demo Compatibility**")
-        for k, v in sorted(demo.items()):
-            st.metric(k, v)
-
-    with c4:
-        st.markdown("**Retroactive Fill**")
-        st.metric("True", rbf.get("true", 0))
-        st.metric("False", rbf.get("false", 0))
-        st.metric("N/A", rbf.get("none", 0))
-
-    st.divider()
-
-# ---------------------------------------------------------------------------
-# Signal Table
-# ---------------------------------------------------------------------------
-st.subheader("📋 Signal Records")
-table = data.get("signal_table", pd.DataFrame())
-if not table.empty:
-    # Filters
-    fc1, fc2, fc3, fc4 = st.columns(4)
-    with fc1:
-        symbols = sorted(table["symbol"].dropna().unique()) if "symbol" in table.columns else []
-        sel_symbol = st.multiselect("Symbol", symbols, default=[])
-    with fc2:
-        sides = sorted(table["side"].dropna().unique()) if "side" in table.columns else []
-        sel_side = st.multiselect("Side", sides, default=[])
-    with fc3:
-        statuses = sorted(table["status"].dropna().unique()) if "status" in table.columns else []
-        sel_status = st.multiselect("Status", statuses, default=[])
-    with fc4:
-        if "demo_classification" in table.columns:
-            demos = sorted(table["demo_classification"].dropna().unique())
-            sel_demo = st.multiselect("Demo", demos, default=[])
-        else:
-            sel_demo = []
-
-    # Apply filters
-    filtered = table.copy()
-    if sel_symbol and "symbol" in filtered.columns:
-        filtered = filtered[filtered["symbol"].isin(sel_symbol)]
-    if sel_side and "side" in filtered.columns:
-        filtered = filtered[filtered["side"].isin(sel_side)]
-    if sel_status and "status" in filtered.columns:
-        filtered = filtered[filtered["status"].isin(sel_status)]
-    if sel_demo and "demo_classification" in filtered.columns:
-        filtered = filtered[filtered["demo_classification"].isin(sel_demo)]
-
-    st.dataframe(filtered, use_container_width=True, hide_index=True)
-
-    # CSV download
-    csv = filtered.to_csv(index=False)
-    st.download_button(
-        "📥 Download filtered CSV",
-        data=csv,
-        file_name=f"swing_signals_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv",
-        mime="text/csv",
+# ===========================================================================
+# TAB 1 — APPROVED PAIRS (Telegram + Binance Demo)
+# ===========================================================================
+with tab_approved:
+    st.caption(
+        "Señales SWING de los pares ya aprobados: se envían a **Telegram** y se "
+        "ejecutan en **Binance Demo**. (Shadow — NOT OFFICIAL)."
     )
-else:
-    st.info("No signal records in this window.")
 
-st.divider()
+    # --- Signal KPIs --------------------------------------------------------
+    kpis = data.get("signal_kpis", {})
+    if kpis.get("available"):
+        st.subheader("📊 Signal KPIs")
+        st.caption("Lifecycle status (dimension A) and official result (dimension B)")
 
-# ---------------------------------------------------------------------------
-# SWING Shadow core pairs (Telegram + Binance Demo)
-# ---------------------------------------------------------------------------
-st.subheader("🧪 SWING SHADOW — CORE PAIRS (TELEGRAM + DEMO)")
-st.caption(
-    "NOT OFFICIAL — shadow signals from the core pairs that are sent to "
-    "Telegram and executed on Binance Demo."
-)
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+        with c1:
+            st.metric("Total", kpis.get("total", 0))
+        with c2:
+            st.metric("Pending", kpis.get("lifecycle_pending", 0))
+        with c3:
+            st.metric("Activated", kpis.get("lifecycle_activated", 0))
+        with c4:
+            st.metric("Closed", kpis.get("lifecycle_closed", 0))
+        with c5:
+            st.metric("Cancelled", kpis.get("lifecycle_cancelled", 0))
+        with c6:
+            st.metric("Expired", kpis.get("lifecycle_expired", 0))
+        with c7:
+            st.metric("Other", kpis.get("lifecycle_other", 0))
 
-shadow = data.get("shadow", {})
-if shadow.get("available"):
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Shadow signals", shadow.get("rows", 0))
-    with c2:
-        st.metric("Pairs", shadow.get("pairs", 0))
-    with c3:
-        wins = int(shadow["table"]["wins"].sum()) if not shadow["table"].empty else 0
-        losses = int(shadow["table"]["losses"].sum()) if not shadow["table"].empty else 0
-        total_closed = wins + losses
-        wr = round(wins / total_closed * 100, 1) if total_closed > 0 else None
-        st.metric("Combined WR", f"{wr}%" if wr is not None else "N/A")
+        st.markdown("**Official Result**")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Win", kpis.get("result_win", 0))
+        with c2:
+            st.metric("Loss", kpis.get("result_loss", 0))
+        with c3:
+            st.metric("BE", kpis.get("result_be", 0))
+        with c4:
+            st.metric("Unknown", kpis.get("result_unknown", 0))
 
-    shadow_table = shadow.get("table", pd.DataFrame())
-    if not shadow_table.empty:
-        st.dataframe(
-            shadow_table,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "symbol": st.column_config.TextColumn("Symbol", width="medium"),
-                "signals": st.column_config.NumberColumn("Signals", width="small"),
-                "closed": st.column_config.NumberColumn("Closed", width="small"),
-                "wins": st.column_config.NumberColumn("Wins", width="small"),
-                "losses": st.column_config.NumberColumn("Losses", width="small"),
-                "win_rate": st.column_config.NumberColumn("WR %", width="small"),
-                "total_r": st.column_config.NumberColumn("Total R", width="small"),
-            },
-        )
-else:
-    st.info("No SWING shadow core-pair data available in this window.")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            pf = kpis.get("profit_factor")
+            st.metric("Profit Factor", str(pf) if pf is not None else "N/A")
+            pw = kpis.get("pf_warning")
+            if pw:
+                st.caption(f"⚠️ {pw}")
+        with c2:
+            tr = kpis.get("total_r")
+            st.metric("Total R", f"{tr:.2f}" if tr is not None else "N/A")
+        with c3:
+            ar = kpis.get("avg_r")
+            st.metric("Avg R", f"{ar:.2f}" if ar is not None else "N/A")
+        with c4:
+            st.metric("Closed Evaluable", kpis.get("closed_evaluable", 0))
+            st.metric("Latest Signal", kpis.get("latest_signal_id", "N/A"))
 
-st.divider()
+        st.divider()
 
-# ---------------------------------------------------------------------------
-# INTERNAL UNIVERSE PROBE (experimental only — no Telegram, no Demo)
-# ---------------------------------------------------------------------------
-st.subheader("🧪 SWING EXPERIMENTAL / SHADOW — UNIVERSE PROBE (SHORT)")
-st.caption(
-    "NOT OFFICIAL — internal SHORT-only universe probe (`swing_short_universe_probe_v1`) "
-    "running across 20 additional pairs (B+ · 8 pairs, C · 12 pairs). "
-    "Runs the same SWING_TREND_RECLAIM strategy. "
-    "**Never** sent to Telegram. **Never** executed on Binance Demo."
-)
+    # --- Per-Symbol Summary (ex-SWING SHADOW panel) -------------------------
+    shadow = data.get("shadow", {})
+    if shadow.get("available"):
+        st.subheader("🧩 Per-Symbol Summary")
+        st.caption("Resumen por símbolo de las señales enviadas (Telegram + Binance Demo).")
 
-exp = data.get("experiments", {})
-if exp.get("available"):
-    probe_table = exp.get("table", pd.DataFrame())
-    summary_tiers = exp.get("summary_by_tier", {})
-    symbol_table = exp.get("summary_by_symbol", pd.DataFrame())
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            st.metric("Signals", shadow.get("rows", 0))
+        with sc2:
+            st.metric("Pairs", shadow.get("pairs", 0))
+        with sc3:
+            shadow_table = shadow.get("table", pd.DataFrame())
+            wins = int(shadow_table["wins"].sum()) if not shadow_table.empty else 0
+            losses = int(shadow_table["losses"].sum()) if not shadow_table.empty else 0
+            total_closed = wins + losses
+            wr = round(wins / total_closed * 100, 1) if total_closed > 0 else None
+            st.metric("Combined WR", f"{wr}%" if wr is not None else "N/A")
 
-    # --- Header metrics ----------------------------------------------------
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Probe signals", exp.get("rows", 0))
-    with c2:
-        st.metric("Pairs tracked", len(symbol_table) if not symbol_table.empty else 0)
-    with c3:
-        total_open = int(sum(t.get("open", 0) for t in summary_tiers.values()))
-        st.metric("Open", total_open)
-    with c4:
-        total_closed = int(sum(t.get("closed", 0) for t in summary_tiers.values()))
-        total_wins = int(sum(t.get("wins", 0) for t in summary_tiers.values()))
-        total_losses = int(sum(t.get("losses", 0) for t in summary_tiers.values()))
-        wr = round(total_wins / max(1, total_wins + total_losses) * 100, 1) if (total_wins + total_losses) > 0 else None
-        st.metric("Closed", total_closed)
-        st.caption(f"Combined WR: {wr}%" if wr is not None else "Combined WR: N/A")
-
-    # --- Per-tier summary panels ------------------------------------------
-    tier_cols = st.columns(max(1, len(summary_tiers)))
-    tier_col_map = {"BPLUS": "B+", "C": "C"}
-    for i, (tier, tdata) in enumerate(sorted(summary_tiers.items())):
-        with tier_cols[i]:
-            tier_label = tier_col_map.get(tier, str(tier))
-            st.subheader(f"🥉 Tier {tier_label}")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.metric("Signals", tdata.get("signals", 0))
-                st.metric("Wins", tdata.get("wins", 0))
-                st.metric("Losses", tdata.get("losses", 0))
-                st.metric("Non-evaluable", tdata.get("non_evaluable", 0))
-            with col_b:
-                st.metric("Open", tdata.get("open", 0))
-                st.metric("Closed", tdata.get("closed", 0))
-                t_r = tdata.get("total_r")
-                st.metric("Total R", f"{t_r:.2f}" if t_r is not None else "N/A")
-                a_r = tdata.get("avg_r")
-                st.metric("Avg R", f"{a_r:.2f}" if a_r is not None else "N/A")
-
-            wr_t = tdata.get("win_rate")
-            st.caption(f"**Win rate:** {wr_t}%" if wr_t is not None else "**Win rate:** N/A")
+        if not shadow_table.empty:
+            st.dataframe(
+                shadow_table,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "symbol": st.column_config.TextColumn("Symbol", width="medium"),
+                    "signals": st.column_config.NumberColumn("Signals", width="small"),
+                    "closed": st.column_config.NumberColumn("Closed", width="small"),
+                    "wins": st.column_config.NumberColumn("Wins", width="small"),
+                    "losses": st.column_config.NumberColumn("Losses", width="small"),
+                    "win_rate": st.column_config.NumberColumn("WR %", width="small"),
+                    "total_r": st.column_config.NumberColumn("Total R", width="small"),
+                },
+            )
+    else:
+        st.info("No shadow per-symbol data available in this window.")
 
     st.divider()
 
-    # --- Per-symbol summary table -----------------------------------------
-    st.markdown("**📈 Performance por símbolo**")
-    if not symbol_table.empty:
-        symbol_display = symbol_table.copy()
-        tier_display_col = symbol_display["tier"].map(tier_col_map).fillna(symbol_display["tier"])
-        symbol_display.insert(0, "Tier", tier_display_col)
-        symbol_display = symbol_display.drop(columns=["tier"])
+    # --- Executability Panel -------------------------------------------------
+    exec_data = data.get("executability", {})
+    if exec_data.get("available"):
+        st.subheader("⚡ Executability")
+        st.caption("same_market_bar and execution_detached are different concepts")
 
-        st.dataframe(
-            symbol_display,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Tier": st.column_config.TextColumn("Tier", width="small"),
-                "symbol": st.column_config.TextColumn("Symbol", width="medium"),
-                "signals": st.column_config.NumberColumn("Signals", width="small"),
-                "open": st.column_config.NumberColumn("Open", width="small"),
-                "closed": st.column_config.NumberColumn("Closed", width="small"),
-                "wins": st.column_config.NumberColumn("Wins", width="small"),
-                "losses": st.column_config.NumberColumn("Losses", width="small"),
-                "non_evaluable": st.column_config.NumberColumn("Non-eval", width="small"),
-                "total_r": st.column_config.NumberColumn("Total R", width="small"),
-                "avg_r": st.column_config.NumberColumn("Avg R", width="small"),
-                "win_rate": st.column_config.NumberColumn("WR %", width="small"),
-            },
+        smb = exec_data.get("same_market_bar", {})
+        ed = exec_data.get("execution_detached", {})
+        demo = exec_data.get("demo_compatibility", {})
+        rbf = exec_data.get("retroactive_bar_fill", {})
+
+        c1, c2, c3, c4 = st.columns(4)
+
+        with c1:
+            st.markdown("**same_market_bar**")
+            st.metric("True", smb.get("true", 0))
+            st.metric("False", smb.get("false", 0))
+            st.metric("N/A", smb.get("none", 0))
+            st.caption(f"Derived: {smb.get('derived', 0)} | Canonical: {smb.get('canonical', 0)}")
+
+        with c2:
+            st.markdown("**Execution Detached**")
+            st.metric("True", ed.get("true", 0))
+            st.metric("False", ed.get("false", 0))
+            st.metric("N/A", ed.get("none", 0))
+
+        with c3:
+            st.markdown("**Demo Compatibility**")
+            for k, v in sorted(demo.items()):
+                st.metric(k, v)
+
+        with c4:
+            st.markdown("**Retroactive Fill**")
+            st.metric("True", rbf.get("true", 0))
+            st.metric("False", rbf.get("false", 0))
+            st.metric("N/A", rbf.get("none", 0))
+
+        st.divider()
+
+    # --- Signal Table ---------------------------------------------------------
+    st.subheader("📋 Signal Records")
+    table = data.get("signal_table", pd.DataFrame())
+    if not table.empty:
+        # Filters
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        with fc1:
+            symbols = sorted(table["symbol"].dropna().unique()) if "symbol" in table.columns else []
+            sel_symbol = st.multiselect("Symbol", symbols, default=[], key="approved_symbol")
+        with fc2:
+            sides = sorted(table["side"].dropna().unique()) if "side" in table.columns else []
+            sel_side = st.multiselect("Side", sides, default=[], key="approved_side")
+        with fc3:
+            statuses = sorted(table["status"].dropna().unique()) if "status" in table.columns else []
+            sel_status = st.multiselect("Status", statuses, default=[], key="approved_status")
+        with fc4:
+            if "demo_classification" in table.columns:
+                demos = sorted(table["demo_classification"].dropna().unique())
+                sel_demo = st.multiselect("Demo", demos, default=[], key="approved_demo")
+            else:
+                sel_demo = []
+
+        # Apply filters
+        filtered = table.copy()
+        if sel_symbol and "symbol" in filtered.columns:
+            filtered = filtered[filtered["symbol"].isin(sel_symbol)]
+        if sel_side and "side" in filtered.columns:
+            filtered = filtered[filtered["side"].isin(sel_side)]
+        if sel_status and "status" in filtered.columns:
+            filtered = filtered[filtered["status"].isin(sel_status)]
+        if sel_demo and "demo_classification" in filtered.columns:
+            filtered = filtered[filtered["demo_classification"].isin(sel_demo)]
+
+        st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+        # CSV download
+        csv = filtered.to_csv(index=False)
+        st.download_button(
+            "📥 Download filtered CSV",
+            data=csv,
+            file_name=f"swing_signals_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            key="download_approved_csv",
         )
     else:
-        st.info("No symbol-level aggregates available.")
+        st.info("No signal records in this window.")
 
-    st.markdown("**🔬 Detalle por setup**")
-    if not probe_table.empty:
-        # Filters
-        fc1, fc2, fc3 = st.columns(3)
-        with fc1:
-            symbols_p = sorted(probe_table["symbol"].dropna().unique()) if "symbol" in probe_table.columns else []
-            sel_sym_p = st.multiselect("Symbol", symbols_p, default=[], key="probe_symbol")
-        with fc2:
-            tiers_p = sorted(probe_table["tier"].dropna().unique()) if "tier" in probe_table.columns else []
-            sel_tier_p = st.multiselect("Tier", tiers_p, default=[], key="probe_tier")
-        with fc3:
-            statuses_p = sorted(probe_table["status"].dropna().unique()) if "status" in probe_table.columns else []
-            sel_status_p = st.multiselect("Status", statuses_p, default=[], key="probe_status")
-
-        filtered_p = probe_table.copy()
-        if sel_sym_p and "symbol" in filtered_p.columns:
-            filtered_p = filtered_p[filtered_p["symbol"].isin(sel_sym_p)]
-        if sel_tier_p and "tier" in filtered_p.columns:
-            filtered_p = filtered_p[filtered_p["tier"].isin(sel_tier_p)]
-        if sel_status_p and "status" in filtered_p.columns:
-            filtered_p = filtered_p[filtered_p["status"].isin(sel_status_p)]
-
-        st.dataframe(filtered_p, use_container_width=True, hide_index=True)
-
-        csv_p = filtered_p.to_csv(index=False)
-        st.download_button(
-            "📥 Download probe CSV",
-            data=csv_p,
-            file_name=f"swing_universe_probe_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-        )
-else:
-    st.info(
-        "No universe probe data available in this window. "
-        "The probe is enabled (`SWING_INTERNAL_UNIVERSE_PROBE_ENABLED=true`) "
-        "but may have no rows yet."
+# ===========================================================================
+# TAB 2 — UNIVERSE PROBE (EXPERIMENTAL — NOT SENT)
+# ===========================================================================
+with tab_probe:
+    st.subheader("🔬 SWING EXPERIMENTAL / SHADOW — UNIVERSE PROBE (SHORT)")
+    st.caption(
+        "NOT OFFICIAL — internal SHORT-only universe probe (`swing_short_universe_probe_v1`) "
+        "running across 20 additional pairs (B+ · 8 pairs, C · 12 pairs). "
+        "Runs the same SWING_TREND_RECLAIM strategy. "
+        "**Never** sent to Telegram. **Never** executed on Binance Demo."
     )
+
+    exp = data.get("experiments", {})
+    if exp.get("available"):
+        exp_kpis = exp.get("kpis", {})
+        if exp_kpis.get("available"):
+            st.subheader("📊 Experiment KPIs")
+            st.caption("Lifecycle status (dimension A) and result (dimension B)")
+
+            e1, e2, e3, e4, e5, e6, e7 = st.columns(7)
+            with e1:
+                st.metric("Total", exp_kpis.get("total", 0))
+            with e2:
+                st.metric("Pending", exp_kpis.get("lifecycle_pending", 0))
+            with e3:
+                st.metric("Activated", exp_kpis.get("lifecycle_activated", 0))
+            with e4:
+                st.metric("Closed", exp_kpis.get("lifecycle_closed", 0))
+            with e5:
+                st.metric("Cancelled", exp_kpis.get("lifecycle_cancelled", 0))
+            with e6:
+                st.metric("Expired", exp_kpis.get("lifecycle_expired", 0))
+            with e7:
+                st.metric("Other", exp_kpis.get("lifecycle_other", 0))
+
+            st.markdown("**Result**")
+            e1, e2, e3, e4, e5 = st.columns(5)
+            with e1:
+                st.metric("Win", exp_kpis.get("result_win", 0))
+            with e2:
+                st.metric("Loss", exp_kpis.get("result_loss", 0))
+            with e3:
+                st.metric("BE", exp_kpis.get("result_be", 0))
+            with e4:
+                st.metric("Non-eval", exp_kpis.get("non_evaluable", 0))
+            with e5:
+                st.metric("Unknown", exp_kpis.get("result_unknown", 0))
+
+            e1, e2, e3, e4 = st.columns(4)
+            with e1:
+                epf = exp_kpis.get("profit_factor")
+                st.metric("Profit Factor", str(epf) if epf is not None else "N/A")
+                epw = exp_kpis.get("pf_warning")
+                if epw:
+                    st.caption(f"⚠️ {epw}")
+            with e2:
+                etr = exp_kpis.get("total_r")
+                st.metric("Total R", f"{etr:.2f}" if etr is not None else "N/A")
+            with e3:
+                ear = exp_kpis.get("avg_r")
+                st.metric("Avg R", f"{ear:.2f}" if ear is not None else "N/A")
+            with e4:
+                st.metric("Closed Evaluable", exp_kpis.get("closed_evaluable", 0))
+                st.metric("Latest Signal", exp_kpis.get("latest_signal_id", "N/A"))
+
+            st.divider()
+
+        probe_table = exp.get("table", pd.DataFrame())
+        summary_tiers = exp.get("summary_by_tier", {})
+        symbol_table = exp.get("summary_by_symbol", pd.DataFrame())
+
+        # --- Header metrics ----------------------------------------------------
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Probe signals", exp.get("rows", 0))
+        with c2:
+            st.metric("Pairs tracked", len(symbol_table) if not symbol_table.empty else 0)
+        with c3:
+            total_open = int(sum(t.get("open", 0) for t in summary_tiers.values()))
+            st.metric("Open", total_open)
+        with c4:
+            total_closed = int(sum(t.get("closed", 0) for t in summary_tiers.values()))
+            total_wins = int(sum(t.get("wins", 0) for t in summary_tiers.values()))
+            total_losses = int(sum(t.get("losses", 0) for t in summary_tiers.values()))
+            wr = round(total_wins / max(1, total_wins + total_losses) * 100, 1) if (total_wins + total_losses) > 0 else None
+            st.metric("Closed", total_closed)
+            st.caption(f"Combined WR: {wr}%" if wr is not None else "Combined WR: N/A")
+
+        # --- Per-tier summary panels ------------------------------------------
+        tier_cols = st.columns(max(1, len(summary_tiers)))
+        tier_col_map = {"BPLUS": "B+", "C": "C"}
+        for i, (tier, tdata) in enumerate(sorted(summary_tiers.items())):
+            with tier_cols[i]:
+                tier_label = tier_col_map.get(tier, str(tier))
+                st.subheader(f"🥉 Tier {tier_label}")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("Signals", tdata.get("signals", 0))
+                    st.metric("Wins", tdata.get("wins", 0))
+                    st.metric("Losses", tdata.get("losses", 0))
+                    st.metric("Non-evaluable", tdata.get("non_evaluable", 0))
+                with col_b:
+                    st.metric("Open", tdata.get("open", 0))
+                    st.metric("Closed", tdata.get("closed", 0))
+                    t_r = tdata.get("total_r")
+                    st.metric("Total R", f"{t_r:.2f}" if t_r is not None else "N/A")
+                    a_r = tdata.get("avg_r")
+                    st.metric("Avg R", f"{a_r:.2f}" if a_r is not None else "N/A")
+
+                wr_t = tdata.get("win_rate")
+                st.caption(f"**Win rate:** {wr_t}%" if wr_t is not None else "**Win rate:** N/A")
+
+        st.divider()
+
+        # --- Per-symbol summary table -----------------------------------------
+        st.markdown("**📈 Performance por símbolo**")
+        if not symbol_table.empty:
+            symbol_display = symbol_table.copy()
+            tier_display_col = symbol_display["tier"].map(tier_col_map).fillna(symbol_display["tier"])
+            symbol_display.insert(0, "Tier", tier_display_col)
+            symbol_display = symbol_display.drop(columns=["tier"])
+
+            st.dataframe(
+                symbol_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Tier": st.column_config.TextColumn("Tier", width="small"),
+                    "symbol": st.column_config.TextColumn("Symbol", width="medium"),
+                    "signals": st.column_config.NumberColumn("Signals", width="small"),
+                    "open": st.column_config.NumberColumn("Open", width="small"),
+                    "closed": st.column_config.NumberColumn("Closed", width="small"),
+                    "wins": st.column_config.NumberColumn("Wins", width="small"),
+                    "losses": st.column_config.NumberColumn("Losses", width="small"),
+                    "non_evaluable": st.column_config.NumberColumn("Non-eval", width="small"),
+                    "total_r": st.column_config.NumberColumn("Total R", width="small"),
+                    "avg_r": st.column_config.NumberColumn("Avg R", width="small"),
+                    "win_rate": st.column_config.NumberColumn("WR %", width="small"),
+                },
+            )
+        else:
+            st.info("No symbol-level aggregates available.")
+
+        st.markdown("**🔬 Detalle por setup**")
+        if not probe_table.empty:
+            # Filters
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                symbols_p = sorted(probe_table["symbol"].dropna().unique()) if "symbol" in probe_table.columns else []
+                sel_sym_p = st.multiselect("Symbol", symbols_p, default=[], key="probe_symbol")
+            with fc2:
+                tiers_p = sorted(probe_table["tier"].dropna().unique()) if "tier" in probe_table.columns else []
+                sel_tier_p = st.multiselect("Tier", tiers_p, default=[], key="probe_tier")
+            with fc3:
+                statuses_p = sorted(probe_table["status"].dropna().unique()) if "status" in probe_table.columns else []
+                sel_status_p = st.multiselect("Status", statuses_p, default=[], key="probe_status")
+
+            filtered_p = probe_table.copy()
+            if sel_sym_p and "symbol" in filtered_p.columns:
+                filtered_p = filtered_p[filtered_p["symbol"].isin(sel_sym_p)]
+            if sel_tier_p and "tier" in filtered_p.columns:
+                filtered_p = filtered_p[filtered_p["tier"].isin(sel_tier_p)]
+            if sel_status_p and "status" in filtered_p.columns:
+                filtered_p = filtered_p[filtered_p["status"].isin(sel_status_p)]
+
+            st.dataframe(filtered_p, use_container_width=True, hide_index=True)
+
+            csv_p = filtered_p.to_csv(index=False)
+            st.download_button(
+                "📥 Download probe CSV",
+                data=csv_p,
+                file_name=f"swing_universe_probe_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="download_probe_csv",
+            )
+    else:
+        st.info(
+            "No universe probe data available in this window. "
+            "The probe is enabled (`SWING_INTERNAL_UNIVERSE_PROBE_ENABLED=true`) "
+            "but may have no rows yet."
+        )
 
 st.divider()
 
