@@ -180,7 +180,7 @@ def read_sql_df_pg(
         raise ValueError("WITH query contains write operations (INSERT/UPDATE/DELETE/TRUNCATE/CREATE/DROP/ALTER) – rejected")
 
     try:
-        return pd.read_sql_query(query, conn, params=params or [])
+        return pd.read_sql_query(query, conn, params=params or ())
     except Exception as e:
         raise RuntimeError(_sanitize_error_message(e)) from e
 
