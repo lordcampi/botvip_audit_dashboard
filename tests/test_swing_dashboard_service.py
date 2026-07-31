@@ -18,6 +18,7 @@ from src.swing_dashboard_service import (
     _build_executability,
     _build_signal_table,
     _build_experiments_panel,
+    _build_shadow_panel,
     _build_scanner_panel,
     is_swing_trend_reclaim_signal,
     filter_swing_official_signals,
@@ -26,6 +27,7 @@ from src.swing_dashboard_service import (
     _fingerprint_segmentation,
     _resolve_nested_timestamp,
     _safe_str,
+    SWING_SCOPE_SIDE,
     COLOMBIA_OFFSET,
 )
 
@@ -472,16 +474,207 @@ class TestBuildSignalTable:
 # Experiments + Scanner panels
 # ---------------------------------------------------------------------------
 class TestExperimentsPanel:
+    """Tests for the experimental panel — now filters to swing_short_universe_probe_v1."""
+
     def test_empty_returns_unavailable(self):
         result = _build_experiments_panel(pd.DataFrame())
         assert result["available"] is False
         assert result["rows"] == 0
 
-    def test_with_data(self):
-        df = pd.DataFrame({"id": [1, 2], "variant_id": ["v1", "v2"]})
+    def test_none_returns_unavailable(self):
+        result = _build_experiments_panel(None)
+        assert result["available"] is False
+
+    def test_with_only_probe_variant(self):
+        df = pd.DataFrame({
+            "id": [1, 2],
+            "variant_id": ["swing_short_universe_probe_v1"] * 2,
+            "side": ["SHORT", "SHORT"],
+            "symbol": ["HYPEUSDT", "SUIUSDT"],
+            "status": ["PROBE_PENDING", "PROBE_STOP_LOSS"],
+            "payload_json": [
+                '{"tier": "BPLUS", "cluster": "OTHER", "result_r": null}',
+                '{"tier": "BPLUS", "cluster": "AI", "result_r": -1.0, "reason": "stop_loss"}',
+            ],
+        })
         result = _build_experiments_panel(df)
         assert result["available"] is True
         assert result["rows"] == 2
+        assert result["variant_id"] == "swing_short_universe_probe_v1"
+        table = result["table"]
+        assert not table.empty
+        assert "tier" in table.columns
+        assert "cluster" in table.columns
+        assert set(table["tier"].dropna()) == {"BPLUS"}
+
+    def test_legacy_donchian_variant_excluded(self):
+        """Rows from swing_donchian_12_shadow must NOT appear in the probe panel."""
+        df = pd.DataFrame({
+            "id": [1, 2],
+            "variant_id": ["swing_donchian_12_shadow"] * 2,
+            "side": ["SHORT", "LONG"],
+            "symbol": ["BTCUSDT", "ETHUSDT"],
+            "status": ["SHADOW_STOP_LOSS", "SHADOW_PRIMARY_TP"],
+            "payload_json": ["{}", "{}"],
+        })
+        result = _build_experiments_panel(df)
+        assert result["available"] is False
+        assert result["rows"] == 0
+
+    def test_probe_long_rows_excluded(self):
+        """Only SHORT rows from the probe variant are shown."""
+        df = pd.DataFrame({
+            "id": [1, 2],
+            "variant_id": ["swing_short_universe_probe_v1"] * 2,
+            "side": ["SHORT", "LONG"],
+            "symbol": ["HYPEUSDT", "SUIUSDT"],
+            "status": ["PROBE_PENDING", "PROBE_STOP_LOSS"],
+            "payload_json": ["{}", "{}"],
+        })
+        result = _build_experiments_panel(df)
+        assert result["available"] is True
+        assert result["rows"] == 1
+        assert result["table"]["side"].dropna().astype(str).str.upper().iloc[0] == "SHORT"
+
+
+class TestShadowPanel:
+    """Tests for the new SWING SHADOW multi-pair panel (SHORT-only)."""
+
+    def _shadow_df(self):
+        rows = [
+            {"id": 1, "symbol": "LINK/USDT:USDT", "signal_type": "SHORT", "status": "CLOSED",
+             "gross_r": 2.0, "is_shadow": True, "metrics_json": _make_metrics()},
+            {"id": 2, "symbol": "LINK/USDT:USDT", "signal_type": "SHORT", "status": "CLOSED",
+             "gross_r": -1.0, "is_shadow": True, "metrics_json": _make_metrics()},
+            {"id": 3, "symbol": "SOL/USDT:USDT", "signal_type": "SHORT", "status": "CLOSED",
+             "gross_r": 1.5, "is_shadow": True, "metrics_json": _make_metrics()},
+            {"id": 4, "symbol": "SOL/USDT:USDT", "signal_type": "SHORT", "status": "PENDING",
+             "gross_r": None, "is_shadow": True, "metrics_json": _make_metrics()},
+            {"id": 5, "symbol": "ETH/USDT:USDT", "signal_type": "LONG", "status": "CLOSED",
+             "gross_r": 3.0, "is_shadow": True, "metrics_json": _make_metrics()},
+        ]
+        return pd.DataFrame(rows)
+
+    def test_empty_returns_unavailable(self):
+        result = _build_shadow_panel(pd.DataFrame())
+        assert result["available"] is False
+        assert result["rows"] == 0
+
+    def test_none_returns_unavailable(self):
+        result = _build_shadow_panel(None)
+        assert result["available"] is False
+
+    def test_only_shadow_short_rows(self):
+        """LONG rows are excluded; is_shadow=true only."""
+        result = _build_shadow_panel(self._shadow_df())
+        assert result["available"] is True
+        assert result["rows"] == 4  # 5 total minus 1 LONG
+        assert result["pairs"] == 2  # LINK, SOL (ETH LONG excluded)
+
+        table = result["table"]
+        assert set(table["symbol"]) == {"LINK/USDT:USDT", "SOL/USDT:USDT"}
+        link = table[table["symbol"] == "LINK/USDT:USDT"].iloc[0]
+        assert link["signals"] == 2
+        assert link["closed"] == 2
+        assert link["wins"] == 1
+        assert link["losses"] == 1
+        assert link["total_r"] == pytest.approx(1.0)
+
+        sol = table[table["symbol"] == "SOL/USDT:USDT"].iloc[0]
+        assert sol["signals"] == 2
+        assert sol["closed"] == 1
+        assert sol["wins"] == 1
+        assert sol["losses"] == 0
+        assert sol["win_rate"] == 100.0
+
+    def test_sorted_by_total_r_desc(self):
+        result = _build_shadow_panel(self._shadow_df())
+        table = result["table"]
+        total_rs = table["total_r"].dropna().tolist()
+        assert total_rs == sorted(total_rs, reverse=True)
+
+    def test_is_shadow_false_rows_excluded(self):
+        df = pd.DataFrame([
+            {"id": 1, "symbol": "BTC/USDT:USDT", "signal_type": "SHORT", "status": "CLOSED",
+             "gross_r": 1.0, "is_shadow": False, "metrics_json": _make_metrics()},
+        ])
+        result = _build_shadow_panel(df)
+        assert result["available"] is False
+        assert result["rows"] == 0
+
+    def test_non_shadow_long_only_returns_unavailable(self):
+        df = pd.DataFrame([
+            {"id": 1, "symbol": "BTC/USDT:USDT", "signal_type": "LONG", "status": "CLOSED",
+             "gross_r": 1.0, "is_shadow": True, "metrics_json": _make_metrics()},
+        ])
+        result = _build_shadow_panel(df)
+        assert result["available"] is False
+
+
+class TestDashboardShortOnlyScope:
+    """SHORT-only scope in build_swing_dashboard."""
+
+    def test_long_signals_excluded_from_scope(self):
+        """LONG signals should be filtered out of the dashboard view-model."""
+        mock_conn = MagicMock()
+        signals = pd.DataFrame([
+            {"id": 1, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "SOL/USDT:USDT",
+             "signal_type": "SHORT", "status": "CLOSED", "net_r": 1.0, "gross_r": 1.0,
+             "is_shadow": True, "created_at": datetime(2026, 7, 20),
+             "metrics_json": _make_metrics()},
+            {"id": 2, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "ETH/USDT:USDT",
+             "signal_type": "LONG", "status": "CLOSED", "net_r": 3.0, "gross_r": 3.0,
+             "is_shadow": True, "created_at": datetime(2026, 7, 21),
+             "metrics_json": _make_metrics()},
+            {"id": 3, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "LINK/USDT:USDT",
+             "signal_type": "SHORT", "status": "PENDING", "net_r": None, "gross_r": None,
+             "is_shadow": True, "created_at": datetime(2026, 7, 22),
+             "metrics_json": _make_metrics()},
+        ])
+        with patch("src.swing_dashboard_service.build_readonly_conn", return_value=mock_conn):
+            with patch("src.swing_dashboard_service.load_signal_records_pg", return_value=signals):
+                with patch("src.swing_dashboard_service.load_signal_events_pg", return_value=_events_df()):
+                    with patch("src.swing_dashboard_service.load_swing_experimental_lifecycles_pg", return_value=pd.DataFrame()):
+                        with patch("src.swing_dashboard_service.load_scanner_shadow_diagnostics_pg", return_value=pd.DataFrame()):
+                            data = build_swing_dashboard(datetime(2026, 7, 20), datetime(2026, 7, 27))
+
+        assert data.get("error") is None
+        # 3 SWING signals, 1 LONG excluded
+        assert data["total_signals"] == 2
+        assert data["excluded_long"] == 1
+        assert data["signal_kpis"]["total"] == 2
+        # Shadow panel should include the SHORT rows
+        shadow = data.get("shadow", {})
+        assert shadow.get("available") is True
+        assert shadow.get("rows") == 2
+
+    def test_signal_table_only_short(self):
+        """The signal table side column should contain only SHORT values."""
+        mock_conn = MagicMock()
+        signals = pd.DataFrame([
+            {"id": 1, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "SOL/USDT:USDT",
+             "signal_type": "SHORT", "status": "CLOSED", "net_r": 1.0,
+             "is_shadow": True, "created_at": datetime(2026, 7, 20),
+             "metrics_json": _make_metrics()},
+            {"id": 2, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "ETH/USDT:USDT",
+             "signal_type": "LONG", "status": "CLOSED", "net_r": 3.0,
+             "is_shadow": True, "created_at": datetime(2026, 7, 21),
+             "metrics_json": _make_metrics()},
+        ])
+        with patch("src.swing_dashboard_service.build_readonly_conn", return_value=mock_conn):
+            with patch("src.swing_dashboard_service.load_signal_records_pg", return_value=signals):
+                with patch("src.swing_dashboard_service.load_signal_events_pg", return_value=_events_df()):
+                    with patch("src.swing_dashboard_service.load_swing_experimental_lifecycles_pg", return_value=pd.DataFrame()):
+                        with patch("src.swing_dashboard_service.load_scanner_shadow_diagnostics_pg", return_value=pd.DataFrame()):
+                            data = build_swing_dashboard(datetime(2026, 7, 20), datetime(2026, 7, 27))
+
+        table = data.get("signal_table", pd.DataFrame())
+        assert not table.empty
+        assert "side" in table.columns
+        assert set(table["side"].unique()) == {SWING_SCOPE_SIDE}
+
+    def test_swing_scope_side_constant(self):
+        assert SWING_SCOPE_SIDE == "SHORT"
 
 
 class TestScannerPanel:
@@ -552,8 +745,16 @@ class TestOfficialVsShadow:
 
     def test_experiments_panel_is_separate(self):
         """Experiments have their own panel dict."""
-        exp_df = pd.DataFrame({"id": [100], "variant_id": ["vX"]})
+        exp_df = pd.DataFrame({
+            "id": [100],
+            "variant_id": ["swing_short_universe_probe_v1"],
+            "side": ["SHORT"],
+            "symbol": ["HYPEUSDT"],
+            "status": ["PROBE_PENDING"],
+            "payload_json": ["{}"],
+        })
         result = _build_experiments_panel(exp_df)
+        assert result.get("available") is True
         assert "table" in result
         # The experiments panel returns a dict, not mixed with KPIs
 
@@ -896,10 +1097,11 @@ class TestDashboardWithSwingScope:
     def test_excluded_non_swing_appears_in_result(self):
         mock_conn = MagicMock()
         mixed_signals = pd.DataFrame([
-            {"id": 1, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "BTCUSDT", "side": "LONG",
-             "status": "WON", "net_r": 1.0, "gross_r": 1.0, "created_at": datetime(2026, 7, 20),
+            {"id": 1, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "BTCUSDT",
+             "signal_type": "SHORT", "status": "WON", "net_r": 1.0, "gross_r": 1.0,
+             "created_at": datetime(2026, 7, 20),
              "metrics_json": _make_metrics()},
-            {"id": 2, "engine_name": "OFA_ENGINE", "symbol": "ETHUSDT", "side": "SHORT",
+            {"id": 2, "engine_name": "OFA_ENGINE", "symbol": "ETHUSDT", "signal_type": "SHORT",
              "status": "LOST", "net_r": -1.0, "gross_r": -1.0, "created_at": datetime(2026, 7, 20),
              "metrics_json": json.dumps({})},
         ])
@@ -911,14 +1113,16 @@ class TestDashboardWithSwingScope:
                             data = build_swing_dashboard(datetime(2026, 7, 20), datetime(2026, 7, 27))
 
         assert data.get("error") is None
-        assert data["total_signals"] == 1  # only SWING
+        assert data["total_signals"] == 1  # only SWING SHORT
         assert data["excluded_non_swing"] == 1  # OFA excluded
+        assert data["excluded_long"] == 0  # SWING signal is SHORT, nothing excluded by side
         assert data["signal_kpis"]["total"] == 1
 
     def test_fingerprint_segmentation_in_result(self):
         mock_conn = MagicMock()
         signals = pd.DataFrame([
-            {"id": i, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "BTCUSDT", "side": "LONG",
+            {"id": i, "engine_name": "SWING_TREND_RECLAIM_V1", "symbol": "BTCUSDT",
+             "signal_type": "SHORT",
              "status": "WON", "net_r": 1.0, "gross_r": 1.0, "created_at": datetime(2026, 7, 20),
              "metrics_json": _make_metrics(fingerprint=f"fp_version_{i % 2}")}
             for i in range(5)

@@ -39,6 +39,9 @@ SWING_SETUP = "SWING_TREND_RECLAIM_V1"
 # BE tolerance for gross_r fallback
 GROSS_R_BE_TOLERANCE = 0.0001
 
+# Dashboard scope — SHORT only (the bot now operates SHORT signals exclusively)
+SWING_SCOPE_SIDE = "SHORT"
+
 
 # ---------------------------------------------------------------------------
 # Official result resolver
@@ -474,6 +477,20 @@ def build_swing_dashboard(
         signals, excluded_non_swing = filter_swing_official_signals(signals_raw)
         result["excluded_non_swing"] = excluded_non_swing
 
+        # --- SHORT-only scope: the bot now operates SHORT signals exclusively ---
+        # Exclude LONG / UNKNOWN signals from the dashboard scope.
+        if signals is not None and not signals.empty:
+            if "signal_type" in signals.columns:
+                side_series = signals["signal_type"].astype(str).str.upper().str.strip()
+            else:
+                side_series = normalize_side(signals)
+            short_mask = side_series == SWING_SCOPE_SIDE
+            excluded_long = int((~short_mask).sum())
+            signals = signals[short_mask].copy()
+            result["excluded_long"] = excluded_long
+        else:
+            result["excluded_long"] = 0
+
         # Enrich with nested timestamps from metrics_json
         if signals is not None and not signals.empty:
             # Extract born_timestamp from metrics_json → swing_v1
@@ -519,8 +536,11 @@ def build_swing_dashboard(
         # --- Signal detail table ---
         result["signal_table"] = _build_signal_table(signals)
 
-        # --- Experiments ---
+        # --- Experiments (legacy donchian shadow lifecycle table) ---
         result["experiments"] = _build_experiments_panel(experiments)
+
+        # --- SWING SHADOW multi-pair panel (is_shadow=true in signal_records) ---
+        result["shadow"] = _build_shadow_panel(signals)
 
         # --- Scanner diagnostics ---
         result["scanner"] = _build_scanner_panel(scanner)
@@ -865,13 +885,150 @@ def _build_signal_table(signals: pd.DataFrame) -> pd.DataFrame:
 
 
 def _build_experiments_panel(experiments: pd.DataFrame) -> dict:
+    """Build the experimental/shadow panel.
+
+    Shows the INTERNAL UNIVERSE PROBE (swing_short_universe_probe_v1):
+    the SHORT-only multi-pair experiment running the same strategy across
+    additional pairs. These rows live in swing_experimental_lifecycles and
+    are NEVER sent to Telegram and NEVER executed on Binance Demo.
+    """
     if experiments is None or experiments.empty:
+        return {"available": False, "rows": 0}
+
+    df = experiments.copy()
+
+    # Filter to the active probe variant only
+    if "variant_id" in df.columns:
+        df = df[df["variant_id"].astype(str) == "swing_short_universe_probe_v1"]
+    else:
+        return {"available": False, "rows": 0}
+
+    # SHORT only
+    if "side" in df.columns:
+        df = df[df["side"].astype(str).str.upper() == "SHORT"]
+    if df.empty:
+        return {"available": False, "rows": 0}
+
+    # Enrich rows from payload_json (tier, cluster, result_r, reason, etc.)
+    enriched_rows = []
+    for idx, row in df.iterrows():
+        payload = row.get("payload_json")
+        obj = _safe_json_load(payload) if payload else None
+        obj = obj if isinstance(obj, dict) else {}
+        enriched_rows.append({
+            "setup_id": row.get("setup_id"),
+            "symbol": row.get("symbol"),
+            "side": row.get("side"),
+            "tier": obj.get("tier") or "OTHER",
+            "cluster": obj.get("cluster") or "OTHER",
+            "status": row.get("status"),
+            "result_r": obj.get("result_r"),
+            "reason": obj.get("reason"),
+            "entry_price": obj.get("entry_price"),
+            "stop_price": obj.get("stop_price"),
+            "take_profit": obj.get("take_profit"),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        })
+    probe_df = pd.DataFrame(enriched_rows)
+    if probe_df.empty:
         return {"available": False, "rows": 0}
 
     return {
         "available": True,
-        "rows": len(experiments),
-        "table": experiments,
+        "rows": len(probe_df),
+        "table": probe_df,
+        "variant_id": "swing_short_universe_probe_v1",
+    }
+
+
+def _build_shadow_panel(shadow_signals: pd.DataFrame) -> dict:
+    """Build the SWING SHADOW multi-pair panel.
+
+    The new shadow experiment runs the same SWING_TREND_RECLAIM strategy
+    in SHORT across additional pairs. Those signals are persisted in
+    signal_records with is_shadow=true (all current SWING signals are shadow).
+
+    Returns a per-symbol summary table plus counts.
+    """
+    if shadow_signals is None or shadow_signals.empty:
+        return {"available": False, "rows": 0}
+
+    df = shadow_signals
+    # If is_shadow is present, keep only shadow rows (defensive — current
+    # SWING scope is already shadow-only in production data).
+    if "is_shadow" in df.columns:
+        df = df[df["is_shadow"].astype(str).str.lower() == "true"].copy()
+        if df.empty:
+            return {"available": False, "rows": 0}
+
+    # Determine side column
+    if "signal_type" in df.columns:
+        side_series = df["signal_type"].astype(str).str.upper().str.strip()
+    else:
+        side_series = normalize_side(df)
+    df = df[side_series == SWING_SCOPE_SIDE].copy()
+    if df.empty:
+        return {"available": False, "rows": 0}
+
+    # Status series
+    status = df["status"].astype(str).str.upper() if "status" in df.columns else pd.Series(dtype=str)
+
+    # R column
+    r_col = next((c for c in ["gross_r", "net_r", "pnl_r"] if c in df.columns), None)
+
+    rows = []
+    for symbol, grp in df.groupby("symbol", dropna=False):
+        g_status = grp["status"].astype(str).str.upper() if "status" in grp.columns else pd.Series(dtype=str)
+        closed_mask = g_status.isin(["CLOSED", "WON", "LOST"])
+
+        total = len(grp)
+        closed = int(closed_mask.sum())
+        wins = 0
+        losses = 0
+        if "gross_r" in grp.columns and "status" in grp.columns:
+            for _, row in grp.iterrows():
+                if str(row.get("status", "")).upper() in ("CLOSED", "WON", "LOST"):
+                    res = resolve_official_result(row)
+                    if res["value"] == "WIN":
+                        wins += 1
+                    elif res["value"] == "LOSS":
+                        losses += 1
+        elif r_col and "status" in grp.columns:
+            r_vals = pd.to_numeric(grp[r_col], errors="coerce")
+            wins = int((r_vals[closed_mask] > 0).sum())
+            losses = int((r_vals[closed_mask] < 0).sum())
+
+        total_r = None
+        if r_col:
+            r_vals = pd.to_numeric(grp[r_col], errors="coerce")
+            closed_r = r_vals[closed_mask].dropna()
+            if len(closed_r) > 0:
+                total_r = round(float(closed_r.sum()), 4)
+
+        win_rate = round(wins / max(1, wins + losses) * 100, 1) if (wins + losses) > 0 else None
+
+        rows.append({
+            "symbol": symbol,
+            "signals": total,
+            "closed": closed,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "total_r": total_r,
+        })
+
+    table = pd.DataFrame(rows)
+    if table.empty:
+        return {"available": False, "rows": 0}
+
+    table = table.sort_values("total_r", ascending=False).reset_index(drop=True)
+
+    return {
+        "available": True,
+        "rows": len(df),
+        "pairs": len(table),
+        "table": table,
     }
 
 

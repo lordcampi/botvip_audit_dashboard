@@ -22,7 +22,7 @@ st.caption("Observational strategy review — no automatic changes")
 st.divider()
 
 st.markdown("## Strategy")
-st.markdown("**SWING_TREND_RECLAIM_V1** official signals only")
+st.markdown("**SWING_TREND_RECLAIM_V1** — **SHORT only**")
 
 st.markdown("## Data source")
 st.markdown("PostgreSQL read-only (`botvip_readonly`) — no writes, no schema changes, no fallback to SQLite")
@@ -53,7 +53,7 @@ st.success(
 st.info(
     "Use the sidebar or navigate to **Swing Strategy Review** "
     "to explore signal KPIs, lifecycle status, official results, "
-    "fingerprint selection, and experimental data."
+    "fingerprint selection, and the SHORT-only shadow multi-pair experiment."
 )
 
 st.divider()

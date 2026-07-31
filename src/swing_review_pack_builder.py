@@ -556,16 +556,48 @@ def _build_demo_compatibility(
 def _build_shadow_comparison(
     dashboard_data, fp, scope, gen_at, rev_id, w_start_utc, w_end_utc, w_start_co, w_end_co
 ):
-    experiments = dashboard_data.get("experiments", {})
+    shadow = dashboard_data.get("shadow", {})
+    table = shadow.get("table")
+    pairs_summary = None
+    if table is not None and not table.empty:
+        pairs_summary = table.to_dict(orient="records")
+
+    probe = dashboard_data.get("experiments", {})
+    probe_table = probe.get("table")
+    probe_summary = None
+    if probe_table is not None and not probe_table.empty:
+        probe_summary = probe_table.to_dict(orient="records")
+
     return {
         **_common_metadata(dashboard_data, fp, scope, gen_at, rev_id, w_start_utc, w_end_utc, w_start_co, w_end_co,
                           authority="PRIMARY_EXPERIMENTAL", confidence="MEDIUM"),
         "data": {
             "not_official": True,
-            "experimental_row_count": experiments.get("rows", 0),
-            "available": experiments.get("available", False),
-            "comparable_results_available": False,
-            "warnings": ["NOT OFFICIAL — shadow guard lifecycle tracking"],
+            # Shadow core pairs — Telegram + Binance Demo
+            "shadow_core": {
+                "description": "SWING_TREND_RECLAIM SHORT core pairs — sent to Telegram and executed on Binance Demo",
+                "experimental_row_count": shadow.get("rows", 0),
+                "pairs": shadow.get("pairs", 0),
+                "available": shadow.get("available", False),
+                "pairs_summary": pairs_summary,
+                "comparable_results_available": bool(
+                    shadow.get("available", False) and shadow.get("rows", 0) > 0
+                ),
+            },
+            # Universe probe — internal only, no Telegram, no Binance Demo
+            "universe_probe": {
+                "description": "swing_short_universe_probe_v1 — internal SHORT-only probe across extra pairs. Never Telegram. Never Binance Demo.",
+                "experimental_row_count": probe.get("rows", 0),
+                "available": probe.get("available", False),
+                "probe_summary": probe_summary,
+                "comparable_results_available": bool(
+                    probe.get("available", False) and probe.get("rows", 0) > 0
+                ),
+            },
+            "warnings": [
+                "NOT OFFICIAL — Shadow core pairs are sent to Telegram + Binance Demo only.",
+                "NOT OFFICIAL — Universe probe is internal-only: no Telegram, no Binance Demo.",
+            ],
         },
     }
 

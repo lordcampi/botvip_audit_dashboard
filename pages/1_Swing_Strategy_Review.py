@@ -85,7 +85,7 @@ if st.sidebar.button("🔄 Refresh data", use_container_width=True):
 
 st.sidebar.divider()
 st.sidebar.markdown(
-    "**Scope:** SWING_TREND_RECLAIM_V1 official signals only  \n"
+    "**Scope:** SWING_TREND_RECLAIM_V1 **SHORT only**  \n"
     "**Source:** PostgreSQL read-only  \n"
     "**Role:** botvip_readonly  \n"
     "**Trading:** OFF (observational)"
@@ -178,8 +178,10 @@ with col_loaded:
 with col_win:
     st.metric("Signals in window", data.get("total_signals", 0))
 with col_excl:
-    excl = data.get("excluded_non_swing", 0)
-    st.metric("Rows excluded (non-SWING)", excl if excl else "N/A")
+    excl_non_swing = data.get("excluded_non_swing", 0)
+    excl_long = data.get("excluded_long", 0)
+    st.metric("Rows excluded (non-SWING)", excl_non_swing if excl_non_swing else "N/A")
+    st.caption(f"↳ of which LONG: {excl_long if excl_long else '0'}")
 
 # Fingerprint segmentation warning
 fp_seg = data.get("fingerprint_segmentation", {})
@@ -347,19 +349,84 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Experiments Panel
+# SWING Shadow core pairs (Telegram + Binance Demo)
 # ---------------------------------------------------------------------------
-st.subheader("🧪 SWING EXPERIMENTAL / SHADOW")
-st.caption("NOT OFFICIAL — shadow guard lifecycle tracking")
+st.subheader("🧪 SWING SHADOW — CORE PAIRS (TELEGRAM + DEMO)")
+st.caption(
+    "NOT OFFICIAL — shadow signals from the core pairs that are sent to "
+    "Telegram and executed on Binance Demo."
+)
+
+shadow = data.get("shadow", {})
+if shadow.get("available"):
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Shadow signals", shadow.get("rows", 0))
+    with c2:
+        st.metric("Pairs", shadow.get("pairs", 0))
+    with c3:
+        wins = int(shadow["table"]["wins"].sum()) if not shadow["table"].empty else 0
+        losses = int(shadow["table"]["losses"].sum()) if not shadow["table"].empty else 0
+        total_closed = wins + losses
+        wr = round(wins / total_closed * 100, 1) if total_closed > 0 else None
+        st.metric("Combined WR", f"{wr}%" if wr is not None else "N/A")
+
+    shadow_table = shadow.get("table", pd.DataFrame())
+    if not shadow_table.empty:
+        st.dataframe(
+            shadow_table,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "symbol": st.column_config.TextColumn("Symbol", width="medium"),
+                "signals": st.column_config.NumberColumn("Signals", width="small"),
+                "closed": st.column_config.NumberColumn("Closed", width="small"),
+                "wins": st.column_config.NumberColumn("Wins", width="small"),
+                "losses": st.column_config.NumberColumn("Losses", width="small"),
+                "win_rate": st.column_config.NumberColumn("WR %", width="small"),
+                "total_r": st.column_config.NumberColumn("Total R", width="small"),
+            },
+        )
+else:
+    st.info("No SWING shadow core-pair data available in this window.")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# INTERNAL UNIVERSE PROBE (experimental only — no Telegram, no Demo)
+# ---------------------------------------------------------------------------
+st.subheader("🧪 SWING EXPERIMENTAL / SHADOW — UNIVERSE PROBE (SHORT)")
+st.caption(
+    "NOT OFFICIAL — internal SHORT-only universe probe (`swing_short_universe_probe_v1`). "
+    "Runs the same SWING_TREND_RECLAIM strategy across additional pairs. "
+    "**Never** sent to Telegram. **Never** executed on Binance Demo."
+)
 
 exp = data.get("experiments", {})
 if exp.get("available"):
-    st.metric("Experimental rows", exp.get("rows", 0))
-    exp_table = exp.get("table", pd.DataFrame())
-    if not exp_table.empty:
-        st.dataframe(exp_table, use_container_width=True, hide_index=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Probe signals", exp.get("rows", 0))
+    with c2:
+        probe_table = exp.get("table", pd.DataFrame())
+        tiers = sorted(probe_table["tier"].dropna().unique()) if not probe_table.empty and "tier" in probe_table.columns else []
+        st.metric("Tiers", ", ".join(tiers) if tiers else "N/A")
+    with c3:
+        if not probe_table.empty and "result_r" in probe_table.columns:
+            closed_mask = probe_table["status"].astype(str).str.upper().str.startswith("PROBE_")
+            closed_r = pd.to_numeric(probe_table.loc[closed_mask, "result_r"], errors="coerce").dropna()
+            st.metric("Closed evaluable", len(closed_r))
+        else:
+            st.metric("Closed evaluable", "N/A")
+
+    if not probe_table.empty:
+        st.dataframe(probe_table, use_container_width=True, hide_index=True)
 else:
-    st.info("No experimental lifecycle data available.")
+    st.info(
+        "No universe probe data available in this window. "
+        "The probe is enabled (`SWING_INTERNAL_UNIVERSE_PROBE_ENABLED=true`) "
+        "but may have no rows yet."
+    )
 
 st.divider()
 
@@ -506,6 +573,7 @@ elif _allowed_quality:
                                 "fingerprint_scope": _scope,
                                 "signal_count": data.get("total_signals", 0),
                                 "closed_count": kpis.get("lifecycle_closed", 0),
+                                "shadow_count": data.get("shadow", {}).get("rows", 0),
                                 "experimental_count": data.get("experiments", {}).get("rows", 0),
                                 "quality_level": _ql,
                                 "quality_reasons": quality.get("reasons", []),
